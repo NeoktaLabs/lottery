@@ -1,324 +1,541 @@
-# Neokta Lottery — Full-Feature Frontend Specification  
-**(100% Smart Contract Coverage, UX-First)**
+# Neokta Lottery — Frontend Specification (Full Contract Coverage)
 
-This document defines **all frontend requirements** for the Neokta Lottery platform.  
-Every function, view, state, event, and edge case exposed by the smart contracts **must be reflected in the UI**, using **clear and non-technical wording**.
+This document tells a web developer **exactly** what to build to ship a **smooth, non-technical** lottery UI on **Etherlink (Tezos L2)**.
 
-> **Goal:**  
-> Deliver a Web2-grade user experience powered by secure, transparent Web3 infrastructure.
+It maps **1:1** to the current smart contracts:
 
----
+- **LotteryRegistry.sol** — forever registry (Safe-owned)
+- **SingleWinnerDeployer.sol** — deploy + fund + register (Safe-owned admin config)
+- **LotterySingleWinner.sol** — one contract = one lottery instance
 
-## Table of Contents
-
-1. [Global App Structure](#1-global-app-structure)  
-2. [Registry Features](#2-registry-features-use-them-all)  
-3. [Deployer Features](#3-deployer-features-use-them-all)  
-4. [Lottery Features](#4-lottery-features-use-them-all)  
-5. [Protocol Fee Recipient UX](#5-protocol-fee-recipient-ux)  
-6. [Admin Panel (Safe Only)](#6-admin-panel-safe-only--full-feature)  
-7. [Events-Driven UX](#7-events-driven-ux-use-all-the-nice-signals)  
-8. [My Activity Strategy](#8-my-activity-without-an-indexer)  
-9. [Recommended UI Components](#9-recommended-ui-components)  
-10. [Developer Checklist](#10-developer-checklist-every-contract-feature-mapped)  
-11. [UX Wording, State Mapping & Error Translation](#11-ux-wording-state-mapping--error-translation-mandatory)
+> **Key UX principle:** users should never need to understand contracts, gas, entropy fees, or “pull payments”. The UI should translate everything into plain language and provide clear action buttons.
 
 ---
 
-## 1. Global App Structure
+## Table of contents
 
-### Global Navigation
-- **Explore** — Browse all lotteries  
-- **Create** — Create a new lottery  
-- **My Activity** — Tickets, winnings, refunds  
-- **Claims** — Global withdraw panel  
-- **Admin** — Visible only to Safe owner  
-
-### Global Background Jobs (Frontend)
-Polling every 10–30 seconds:
-- Registry pagination (`LotteryRegistered`)
-- Lottery status updates
-- User claimable balances
-
-> The app **must work without an indexer**.
+- [1. Glossary (UI-friendly words)](#1-glossary-ui-friendly-words)
+- [2. Contracts & responsibilities](#2-contracts--responsibilities)
+- [3. Core user journeys](#3-core-user-journeys)
+- [4. Registry pages (explore & verify)](#4-registry-pages-explore--verify)
+- [5. Create flow (deployer)](#5-create-flow-deployer)
+- [6. Lottery detail page (all states)](#6-lottery-detail-page-all-states)
+- [7. Claims center (pull payments)](#7-claims-center-pull-payments)
+- [8. Admin (Safe only)](#8-admin-safe-only)
+- [9. Events-driven UX](#9-events-driven-ux)
+- [10. Error-to-copy mapping (non-technical text)](#10-error-to-copy-mapping-non-technical-text)
+- [11. No-indexer strategy](#11-no-indexer-strategy)
+- [12. Developer checklist (100% feature mapping)](#12-developer-checklist-100-feature-mapping)
 
 ---
 
-## 2. Registry Features (Use Them All)
+## 1. Glossary (UI-friendly words)
 
-### A. All Lotteries Page
+Use these phrases consistently across the UI:
 
-**Reads**
+- **Lottery**: a game people join by buying tickets.
+- **Pot**: the USDC the creator deposits as the prize.
+- **Ticket price**: cost per ticket in USDC.
+- **Tickets sold**: total tickets bought so far.
+- **Minimum tickets**: if not reached by deadline, the lottery is canceled and refunds are enabled.
+- **Deadline**: when the lottery stops accepting tickets (or when it can be finalized).
+- **Finalize**: “Draw the winner” (anyone can do it when ready).
+- **Randomness fee**: a small native fee (XTZ) paid to the randomness provider at finalize time.
+- **Claim**: withdraw money from the contract to your wallet (security model).
+- **Refund**: money returned if the lottery is canceled.
+- **Paused**: safety stop — buying/finalizing/claiming is temporarily disabled.
+
+---
+
+## 2. Contracts & responsibilities
+
+### A) LotteryRegistry (Forever contract)
+What it does:
+- Stores every lottery address ever created on the platform
+- Stores `typeId` (numeric) and `creator` for each lottery
+- Helps the UI display “Verified” lotteries
+
+What it does **not** do:
+- No gameplay logic
+- No finalization logic
+- No payout logic
+
+### B) SingleWinnerDeployer (Type-specific deployer)
+What it does:
+- Creates **single-winner** lotteries
+- Fixes ERC20 approval paradox by handling **funding flow**
+- Registers new lottery addresses in the registry
+
+Admin-configured defaults (Safe can change for **future** lotteries only):
+- USDC address
+- Entropy contract address
+- Entropy provider address
+- `feeRecipient` address
+- `protocolFeePercent` (platform fee %) for **newly created lotteries**
+
+### C) LotterySingleWinner (One instance = one lottery)
+What it does:
+- Stores all settings for **one** lottery (pot, ticket price, rules)
+- Allows users to buy tickets
+- Allows anyone to finalize once eligible
+- Uses Pyth Entropy callback to pick winner
+- Uses **pull-payments** (`claimableFunds`) for security
+- Supports cancel + refunds + emergency cancel if oracle is down
+
+Important immutability rules:
+- For an **existing (active) lottery instance**, these do **not** change:
+  - `feeRecipient` (where platform fees go)
+  - `protocolFeePercent` (platform fee %)
+  - `winningPot`, `ticketPrice`, rules, etc.
+
+> Changing `feeRecipient` or `protocolFeePercent` in the deployer affects **only newly created lotteries**, never existing ones.
+
+---
+
+## 3. Core user journeys
+
+### 3.1 Explore & join
+1. User opens **Explore**
+2. UI lists lotteries from the registry (verified)
+3. User opens a lottery
+4. User buys tickets (USDC approval if needed)
+
+### 3.2 Create a lottery (creator journey)
+1. Creator fills a simple form:
+   - Name
+   - Ticket price
+   - Pot size (USDC)
+   - Deadline (duration)
+   - Min tickets / optional max tickets
+   - Min purchase
+2. UI checks creator USDC balance + allowance to the **Deployer**
+3. If allowance low → show a friendly “Allow USDC” step
+4. Call `createSingleWinnerLottery(...)`
+5. UI confirms:
+   - Lottery is created
+   - Pot is funded
+   - Lottery is “Live”
+
+### 3.3 Draw winner (finalize)
+- When the lottery reaches max tickets or passes deadline, **anyone** can draw the winner.
+- The UI should normally run a bot/serverless job, but still show a “Draw winner” button publicly.
+
+### 3.4 Claim winnings / refunds
+- Winner / creator / feeRecipient / ticket buyers must click “Claim” (withdraw).
+- The UI should provide:
+  - A global **Claims** banner
+  - A single “Claim all” flow (best UX)
+
+---
+
+## 4. Registry pages (explore & verify)
+
+### 4.1 Explore page: “All lotteries”
+**Reads (LotteryRegistry):**
 - `getAllLotteriesCount()`
 - `getAllLotteries(start, limit)`
-- `typeIdOf(lottery)`
-- `creatorOf(lottery)`
-- `registeredAt(lottery)`
+- Per lottery card:
+  - `typeIdOf(lottery)`
+  - `creatorOf(lottery)`
+  - `registeredAt(lottery)`
 
-**UI**
-- Pagination
-- Sort: newest first
-- Filters: lottery type, creator
-- Verified badge if `typeIdOf != 0`
+**UI requirements:**
+- Sort by **newest first** using `registeredAt` (descending)
+- Filters:
+  - “Type” filter (start with “Single Winner” typeId = `1`)
+  - Optional “Creator address” filter
+- Each card shows:
+  - Name (read from the lottery instance)
+  - Status badge (Open / Drawing / Completed / Canceled / Funding)
+  - Pot size, ticket price, tickets sold, time left
 
----
+**Authenticity / safety badge (important):**
+- Show ✅ **Verified** if `typeIdOf(lottery) != 0`
+- If the user manually pastes an address not in registry, show ⚠️ “Not verified”
 
-### B. Lotteries by Type
-
-**Reads**
+### 4.2 Explore page: “By type”
+**Reads (LotteryRegistry):**
 - `getLotteriesByTypeCount(typeId)`
 - `getLotteriesByType(typeId, start, limit)`
 
-**UI**
-- Tabs (Single Winner = typeId 1)
-- Auto-expand for future lottery types
+**UI requirements:**
+- Type tabs:
+  - Single Winner (typeId = 1)
+  - Future types can be added later (UI should accept arbitrary typeId)
 
 ---
 
-## 3. Deployer Features (Use Them All)
+## 5. Create flow (deployer)
 
-### Create Single Winner Lottery
+### 5.1 Create page: Single Winner (TypeId = 1)
 
-**Writes**
-- `createSingleWinnerLottery(...)`
+**Writes (SingleWinnerDeployer):**
+- `createSingleWinnerLottery(name, ticketPrice, winningPot, minTickets, maxTickets, durationSeconds, minPurchaseAmount)`
 
-**UX Flow**
-1. Check USDC balance & allowance
-2. Prompt approval if needed
-3. Create lottery
-4. Funding confirmed automatically
-5. Redirect to lottery page
-6. Confirm registry registration
+**Pre-checks (USDC token):**
+- `balanceOf(user)`
+- `allowance(user, deployerAddress)`
 
----
+**UX copy (simple):**
+- Step 1: “Deposit prize pot (USDC)”
+- Step 2: “Create lottery”
+- Explain once: “USDC approval is needed so the contract can move your prize pot into the lottery.”
 
-## 4. Lottery Features (Use Them ALL)
+**Important:** the deployer funds the lottery and calls `confirmFunding()` internally, so the user should experience this as **one creation transaction** (plus approval if needed).
 
-### A. Core Display
+### 5.2 Deployer debug panel (optional, for support)
+**Reads (SingleWinnerDeployer):**
+- `usdc()`
+- `entropy()`
+- `entropyProvider()`
+- `feeRecipient()`
+- `protocolFeePercent()`
 
-**Reads**
-- `name`, `creator`, `feeRecipient`
-- `createdAt`, `deadline`
-- `status`
-- `ticketPrice`, `winningPot`, `ticketRevenue`
-- `minTickets`, `maxTickets`, `minPurchaseAmount`
-- `winner`, `getSold()`
-
-**UI**
-- Countdown timer
-- Progress bars (min / max)
-- Rule summary cards
-- Winner card when completed
+Show these values in “Debug / Network info” (hidden behind a toggle).
 
 ---
 
-### B. Buy Tickets
+## 6. Lottery detail page (all states)
 
-**Reads**
-- `getMinTicketsToBuy()`
+### 6.1 Reads to show (LotterySingleWinner)
 
-**Writes**
-- `buyTickets(count)`
+Always show these fields:
+- `name()`
+- `status()`
+- `createdAt()`, `deadline()`
+- `ticketPrice()`, `winningPot()`, `ticketRevenue()`
+- `minTickets()`, `maxTickets()`, `minPurchaseAmount()`
+- `getSold()`
+- `creator()`
+- `feeRecipient()`
+- `protocolFeePercent()`
+- `entropyProvider()` (advanced / tooltip)
+- `paused()` (from Pausable)
 
-**UI**
-- Quantity selector (default = minimum)
-- Cost preview
-- Approval flow
-- Confirmation toast
-
----
-
-### C. Finalization (Permissionless)
-
-**Reads**
-- `status`, `deadline`, `getSold()`
-- `entropy.getFee(entropyProvider)`
-
-**Writes**
-- `finalize()`
-
-**UI**
-- “Draw winner” button
-- Fee buffer (+20%)
-- Drawing spinner
-
----
-
-### D. Claims (Pull-Based)
-
-**Reads**
+User-specific reads:
+- `ticketsOwned(user)`
 - `claimableFunds(user)`
 - `claimableEth(user)`
 
-**Writes**
-- `withdrawFunds()`
-- `withdrawEth()`
+Helper reads:
+- `getMinTicketsToBuy()`
+- `getTicketRangesCount()` (advanced)
 
-**UI**
-- Global claims banner
-- Per-lottery claims
-- Success confirmations
+### 6.2 State mapping (UI labels + what to show)
 
----
+`status()` is an enum:
+- `FundingPending` → **“Setting up…”**
+- `Open` → **“Open”**
+- `Drawing` → **“Drawing winner…”**
+- `Completed` → **“Winner picked”**
+- `Canceled` → **“Canceled”**
 
-### E. Cancellation & Refunds
+#### A) FundingPending
+What it means:
+- Lottery address exists but pot not confirmed yet (should be brief)
 
-**Writes**
+Show:
+- “Setting up…” and a spinner
+- Disable buy/finalize
+
+#### B) Open
+Show:
+- Countdown: “Ends in …”
+- Progress:
+  - “Tickets sold: X”
+  - “Minimum needed: Y”
+  - If `maxTickets > 0`: “Max: Z”
+- Buy tickets module
+- “Draw winner” CTA appears only when eligible (see finalize rules)
+
+#### C) Drawing
+Show:
+- “Drawing winner…” with spinner
+- “If this takes too long, funds can be recovered later.” (link to emergency section)
+- Disable buying
+
+#### D) Completed
+Show:
+- Winner address: `winner()`
+- If the UI has the `WinnerPicked` event, show “Winning ticket #…”
+- Claims module (winner/creator/feeRecipient may have claimable funds)
+
+#### E) Canceled
+Show:
+- “Canceled: refunds are available”
+- Refund module if user bought tickets
+- Creator pot refund info
+
+### 6.3 Buy tickets module
+
+**Write:**
+- `buyTickets(count)`
+
+**Pre-checks:**
+- Only allow if `status == Open` and `paused == false`
+- Suggest default `count = getMinTicketsToBuy()`
+
+**UX behavior:**
+- Quantity stepper with presets (1 / 5 / 10 / Max)
+- Show “Total: X USDC”
+- If allowance insufficient → show “Allow USDC” step
+- After purchase, refresh:
+  - `getSold()`
+  - `ticketsOwned(user)`
+  - `ticketRevenue()`
+
+### 6.4 Finalize module (“Draw winner”)
+
+**Write:**
+- `finalize()` (payable)
+
+Eligibility (show button if all true):
+- `status == Open`
+- AND (`now >= deadline` OR (`maxTickets > 0` AND `getSold() >= maxTickets`))
+
+Fee estimation:
+- `entropy.getFee(entropyProvider)` (call the Entropy contract directly)
+- Add buffer (e.g., +20%) and show:
+  - “Randomness fee: ~X XTZ”
+  - “Any extra is refunded automatically.”
+
+After sending tx:
+- Update UI to “Drawing winner…”
+
+### 6.5 Cancel module (only when eligible)
+
+**Write:**
 - `cancel()`
-- `claimTicketRefund()`
 
-**UI**
-- Cancel CTA (when eligible)
-- Refund CTA
-- Clear explanations
+Show button if:
+- `status == Open`
+- AND `now >= deadline`
+- AND `getSold() < minTickets`
 
----
+Copy:
+- “Cancel lottery (enables refunds)”
+- Tooltip: “If minimum tickets weren’t reached, the lottery is canceled and refunds become available.”
 
-### F. Emergency Recovery
+### 6.6 Emergency module (oracle down)
 
-**Writes**
+**Write:**
 - `forceCancelStuck()`
 
-**UI**
-- Countdown timers
-- Clear “Recover funds” CTA
-- Trust-focused messaging
+Show only if `status == Drawing`.
+
+Read:
+- `drawingRequestedAt()`
+- `creator()`, `owner()`
+
+Rules:
+- Creator or Safe owner: can cancel after 24h
+- Anyone: can cancel after 7 days
+
+Copy:
+- “If the randomness service is down, funds can still be recovered.”
 
 ---
 
-## 5. Protocol Fee Recipient UX
+## 7. Claims center (pull payments)
 
-- Display protocol fee recipient address
-- If connected wallet == feeRecipient:
-  - Show withdraw option
-- Fee recipient is:
-  - Set at deployment
-  - Changeable via Safe approval
-  - **Not hardcoded**
+### 7.1 Why claims exist (explain once)
+Use simple text:
+> “For safety, prizes and refunds are kept in the contract until you click **Claim**.”
 
----
+### 7.2 What to read
+For the connected wallet:
+- `claimableFunds(user)` (USDC)
+- `claimableEth(user)` (XTZ refunds from overpaying finalize)
+- `ticketsOwned(user)` (only matters if canceled)
 
-## 6. Admin Panel (Safe Only — Full Feature)
+### 7.3 What to write
+- `withdrawFunds()`
+- `withdrawEth()`
+- `claimTicketRefund()` (only if canceled)
 
-### Registry Admin
-- `setRegistrar()`
-
-### Deployer Admin
-- `setConfig(usdc, entropy, provider, feeRecipient)`
-
-### Lottery Admin
-- `pause / unpause`
-- `setProtocolFee`
-- `setEntropyProvider`
-- `setEntropyContract`
-
-All admin actions:
-- Hidden from non-Safe wallets
-- Display clear warnings
+### 7.4 Best UX: “Claim all”
+Without an indexer:
+- Iterate recent lotteries from the registry (last N pages)
+- For each, check `claimableFunds(user)` and `claimableEth(user)`
+- Offer a batched “Claim all” *in the UI* (sequential txs), with a progress indicator.
 
 ---
 
-## 7. Events-Driven UX
+## 8. Admin (Safe only)
 
-| Event | UX Reaction |
-|------|------------|
-| `LotteryRegistered` | Update lists |
-| `TicketsPurchased` | Update stats |
-| `LotteryFinalized` | Show drawing |
-| `WinnerPicked` | Show winner |
-| `PrizeAllocated` | Notify user |
-| `FundsClaimed` | Success toast |
-| `LotteryCanceled` | Refund notice |
+Admin UI should appear only if connected wallet is the **Safe** (or a Safe signer, depending on how you gate it).
 
----
+### 8.1 Registry admin (LotteryRegistry)
+Writes:
+- `setRegistrar(registrar, authorized)`
+- `transferOwnership(newOwner)` (rare)
 
-## 8. My Activity (Without Indexer)
+Reads:
+- `owner()`
+- `isRegistrar(address)`
 
-- **Created lotteries**
-  - Filter registry by `creatorOf == user`
-- **Participations**
-  - Scan recent lotteries
-  - Check `ticketsOwned(user)`
+UI:
+- List known registrars (your deployers)
+- Add/remove registrar (with confirmation modal)
 
-Cache results locally.
+### 8.2 Deployer admin (SingleWinnerDeployer) — **global config for NEW lotteries**
+Writes:
+- `setConfig(usdc, entropy, entropyProvider, feeRecipient, protocolFeePercent)`
+- `transferOwnership(newOwner)` (rare)
 
----
+Reads:
+- `owner()`
+- `usdc()`, `entropy()`, `entropyProvider()`, `feeRecipient()`, `protocolFeePercent()`
 
-## 9. Recommended UI Components
+UX:
+- Plain language:
+  - “Where platform fees go (new lotteries)”
+  - “Platform fee % (new lotteries)”
+- Warning banner:
+  - “Changes affect only lotteries created after this update.”
 
-- One-click withdraw
-- Safety explainer box
-- Verified badge
-- “Finalize for me” explanation
-- Claim center
+### 8.3 Lottery admin (LotterySingleWinner)
+Writes:
+- `pause()`, `unpause()`
+- `setEntropyProvider(p)` (guarded by `activeDrawings == 0`)
+- `setEntropyContract(e)` (guarded by `activeDrawings == 0`)
 
----
+Reads:
+- `owner()`
+- `paused()`
+- `activeDrawings()`
 
-## 10. Developer Checklist
+UX:
+- These controls are advanced; hide them under “Safety / Advanced”
+- Provide very clear warnings (“Only use if instructed by the team.”)
 
-✅ Registry  
-✅ Deployer  
-✅ Lottery  
-✅ Claims  
-✅ Admin  
-✅ Events  
-
----
-
-## 11. UX Wording, State Mapping & Error Translation (MANDATORY)
-
-### Status → UI Mapping
-
-| Contract Status | UI Label |
-|-----------------|----------|
-| FundingPending | Preparing lottery |
-| Open | Tickets available |
-| Drawing | Picking a winner… |
-| Completed | Winner announced |
-| Canceled | Lottery canceled |
+> Note: **protocol fee % and feeRecipient are NOT changeable on existing lottery instances.** They are fixed at deployment.
 
 ---
 
-### Error → Friendly Message
+## 9. Events-driven UX
 
-| Contract Error | UI Message |
-|---------------|------------|
-| LotteryNotOpen | Tickets are closed |
-| LotteryExpired | Lottery ended |
-| BatchTooCheap | Minimum purchase is $1 |
-| TicketLimitReached | Sold out |
-| NotReadyToFinalize | Still running |
-| NothingToClaim | No funds available |
-| EmergencyHatchLocked | Recovery not available yet |
+The UI should subscribe to events (or poll them via provider) for near real-time updates.
 
----
+### 9.1 Registry events
+**LotteryRegistry:**
+- `LotteryRegistered(index, typeId, lottery, creator)`  
+  Use to instantly add new lottery to Explore without rescanning storage.
 
-### UX Rules
-
-- Never show raw contract errors
-- Disabled buttons must explain why
-- Always reassure users their funds are safe
-- Avoid blockchain terminology
-
----
-
-### Copy Examples
-
-- “Your funds are safely held until you withdraw.”
-- “Anyone can draw the winner to keep things fair.”
-- “Refunds are available if the lottery is canceled.”
+### 9.2 Lottery events
+**LotterySingleWinner:**
+- `FundingConfirmed(funder, amount)` → “Lottery is live”
+- `TicketsPurchased(buyer, count, totalCost, totalSold)` → update sold, activity feed
+- `LotteryFinalized(requestId, totalSold, provider)` → show “Drawing…”
+- `WinnerPicked(winner, winningTicketIndex, totalSold)` → show winner
+- `PrizeAllocated(user, amount, reason)` → show toast:
+  - reason=1: “You won a prize!”
+  - reason=2: “Creator earnings are available”
+  - reason=3: “Refund available”
+  - reason=4: “Platform fee allocated”
+  - reason=5: “Prize pot refunded to creator”
+- `FundsClaimed(user, amount)` → “USDC claimed”
+- `EthRefundAllocated(user, amount)` / `EthClaimed(user, amount)` → show “XTZ refund”
+- `LotteryCanceled(reason)` → show canceled banner with reason
+- `EmergencyRecovery()` → show “Emergency cancellation triggered”
+- `CallbackRejected(seq, reasonCode)` → log only (debug)
 
 ---
 
-## Final Note for Developer
+## 10. Error-to-copy mapping (non-technical text)
 
-> If a user needs blockchain knowledge to use this app, the UX has failed.
+Smart contracts revert with custom errors. The UI should translate them.
 
-This specification maps **1:1 with the smart contracts**, including:
-- Funding flow
-- Pull payments
-- Emergency recovery
-- Registry verification
-- External protocol fee recipient
+Suggested mapping:
+
+- `LotteryNotOpen` → “This lottery isn’t open right now.”
+- `LotteryExpired` → “This lottery has ended. You can’t buy tickets anymore.”
+- `BatchTooSmall` → “Please buy at least the minimum number of tickets.”
+- `BatchTooLarge` → “That’s too many tickets at once. Please try a smaller number.”
+- `BatchTooCheap` → “Please buy a bit more so your purchase meets the minimum amount.”
+- `TicketLimitReached` → “Not enough tickets left. Try a smaller number.”
+- `NotReadyToFinalize` → “Not ready yet. The lottery must end or sell out first.”
+- `InsufficientFee` → “Randomness fee changed. Please try again.”
+- `RequestPending` → “A draw is already in progress.”
+- `NotDrawing` → “This lottery is not waiting for a draw result.”
+- `Wait24Hours` → “Please wait 24 hours before using the emergency option.”
+- `EmergencyHatchLocked` → “Emergency option is available after 7 days.”
+- `NothingToClaim` → “Nothing to claim right now.”
+- `NothingToRefund` → “No refund available for this wallet.”
+- `NotCanceled` → “Refunds are only available if the lottery is canceled.”
+- `CannotCancel` → “This lottery can’t be canceled right now.”
+- `TooManyRanges` → “This lottery is too popular to accept more unique buyers. Try again later.”
+- `Pausable: paused` (or `paused() == true`) → “This lottery is temporarily paused for safety.”
+
+Fallback (unknown revert):
+- “Transaction failed. Please try again. If it keeps happening, contact support.”
 
 ---
+
+## 11. No-indexer strategy
+
+You can ship without an indexer, but you must accept limits.
+
+### 11.1 Explore lists
+- Use registry pagination and cache pages locally.
+- Show “Load more”.
+
+### 11.2 My activity
+Without an indexer:
+- **Created lotteries**: scan registry pages and filter where `creatorOf(lottery) == user`
+- **Joined lotteries**: scan the most recent N lotteries and check `ticketsOwned(user)`
+
+Show honest UX copy:
+- “We’re showing your most recent activity. Older lotteries may require searching.”
+
+### 11.3 Search by address
+Provide a search box:
+- Paste a lottery address
+- Check registry `typeIdOf(address)`:
+  - if 0 → show “Not verified”
+  - else → load details page
+
+---
+
+## 12. Developer checklist (100% feature mapping)
+
+### LotteryRegistry
+- [ ] `getAllLotteriesCount`
+- [ ] `getAllLotteries(start, limit)`
+- [ ] `getLotteriesByTypeCount(typeId)`
+- [ ] `getLotteriesByType(typeId, start, limit)`
+- [ ] `typeIdOf(lottery)`
+- [ ] `creatorOf(lottery)`
+- [ ] `registeredAt(lottery)`
+- [ ] Events: `LotteryRegistered`
+- [ ] Admin: `setRegistrar`, `transferOwnership`
+
+### SingleWinnerDeployer
+- [ ] `createSingleWinnerLottery` (create flow)
+- [ ] Reads: `usdc`, `entropy`, `entropyProvider`, `feeRecipient`, `protocolFeePercent`
+- [ ] Admin: `setConfig`, `transferOwnership`
+- [ ] Events: `ConfigUpdated`
+
+### LotterySingleWinner
+- [ ] Reads: **all public fields** + `getSold`, `getMinTicketsToBuy`, `getTicketRangesCount`
+- [ ] Buy: `buyTickets`
+- [ ] Finalize: `finalize` (payable)
+- [ ] Callback handling (events-driven)
+- [ ] Cancel: `cancel`
+- [ ] Emergency cancel: `forceCancelStuck`
+- [ ] Refund: `claimTicketRefund`
+- [ ] Claims: `withdrawFunds`, `withdrawEth`
+- [ ] Admin: `pause`, `unpause`, `setEntropyProvider`, `setEntropyContract`
+- [ ] Events: all of them, especially `PrizeAllocated` and `FundingConfirmed`
+
+---
+
+### Appendix: UX microcopy examples (ready-to-use)
+
+- **Approve USDC (creator)**: “Allow Neokta to move your prize pot (USDC) into the lottery. You can revoke this anytime.”
+- **Approve USDC (buyer)**: “Allow Neokta to buy tickets using USDC.”
+- **Finalize**: “Draw winner” / subtitle “Requires a small randomness fee.”
+- **Claim**: “Claim to wallet”
+- **Canceled**: “This lottery didn’t reach the minimum tickets. Refunds are now available.”
+- **Drawing**: “We’re drawing the winner. This usually takes a moment.”
+
