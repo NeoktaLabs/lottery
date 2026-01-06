@@ -160,7 +160,7 @@ contract LotteryRegistry {
     function getAllLotteries(uint256 start, uint256 limit) external view returns (address[] memory page) {
         uint256 n = allLotteries.length;
         if (start > n) revert InvalidPagination();
-        if (start == n) return new address;
+        if (start == n || limit == 0) return new address;
 
         uint256 end = start + limit;
         if (end > n) end = n;
@@ -182,7 +182,7 @@ contract LotteryRegistry {
         address[] storage arr = lotteriesByType[typeId];
         uint256 n = arr.length;
         if (start > n) revert InvalidPagination();
-        if (start == n) return new address;
+        if (start == n || limit == 0) return new address;
 
         uint256 end = start + limit;
         if (end > n) end = n;
