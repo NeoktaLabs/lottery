@@ -1,29 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-/**
- * @title SingleWinnerDeployer
- * @notice
- * Deploys LotterySingleWinner instances and registers them in the LotteryRegistry.
- *
- * IMPORTANT FIX (Approval Paradox):
- * - We DO NOT pull USDC in the lottery constructor from the end-user.
- * - Instead, the end-user approves THIS Deployer for `winningPot`.
- * - The Deployer deploys the Lottery, then transfers USDC from user -> Lottery,
- *   then calls lottery.confirmFunding() to activate it.
- *
- * Fee model (global for NEW lotteries):
- * - Safe can update `feeRecipient` and `protocolFeePercent` here.
- * - Those updates affect ONLY newly created lotteries.
- * - Existing lottery instances keep their immutable values.
- */
-
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./LotteryRegistry.sol";
 import "./LotterySingleWinner.sol";
 
-contract SingleWinnerDeployer {
+/**
+ * @title SingleWinnerDeployer
+ * @notice Deploys LotterySingleWinner instances, handles initial funding, 
+ * and registers them in the central LotteryRegistry.
+ */
+contract SingleWinnerDeployer is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // -----------------------------
@@ -32,13 +20,22 @@ contract SingleWinnerDeployer {
     error NotOwner();
     error ZeroAddress();
     error FeeTooHigh();
+    error NotAuthorizedRegistrar();
 
     // -----------------------------
     // Events
     // -----------------------------
     event DeployerOwnershipTransferred(address indexed oldOwner, address indexed newOwner);
 
-    /// @notice Emitted when global deployer config is updated (affects new lotteries only).
+    // Emitted for indexers to easily track new lottery deployments with metadata
+    event LotteryDeployed(
+        address indexed lottery, 
+        address indexed creator, 
+        uint256 winningPot, 
+        uint256 ticketPrice, 
+        string name
+    );
+
     event ConfigUpdated(
         address usdc,
         address entropy,
@@ -48,7 +45,7 @@ contract SingleWinnerDeployer {
     );
 
     // -----------------------------
-    // Ownership (owner should be your Safe)
+    // Ownership
     // -----------------------------
     address public owner;
 
@@ -58,21 +55,18 @@ contract SingleWinnerDeployer {
     }
 
     // -----------------------------
-    // Configuration (shared across all new SingleWinner lotteries)
+    // Config
     // -----------------------------
     LotteryRegistry public immutable registry;
     address public immutable safeOwner;
 
     uint256 public constant SINGLE_WINNER_TYPE_ID = 1;
 
+    // These settings apply to NEW lotteries only. Existing lotteries are immutable.
     address public usdc;
     address public entropy;
     address public entropyProvider;
-
-    /// @notice Protocol fee recipient (external wallet, not the Safe). Affects new lotteries only.
     address public feeRecipient;
-
-    /// @notice Protocol fee percent (0-20). Affects new lotteries only.
     uint256 public protocolFeePercent;
 
     constructor(
@@ -111,14 +105,6 @@ contract SingleWinnerDeployer {
         emit ConfigUpdated(_usdc, _entropy, _entropyProvider, _feeRecipient, _protocolFeePercent);
     }
 
-    /**
-     * @notice Safe can rotate config if needed (e.g. entropy contract upgrade),
-     *         without changing registry or frontend.
-     *
-     * IMPORTANT:
-     * - These values are applied ONLY to lotteries created after this update.
-     * - Existing lottery instances are immutable.
-     */
     function setConfig(
         address _usdc,
         address _entropy,
@@ -147,7 +133,7 @@ contract SingleWinnerDeployer {
     }
 
     // -----------------------------
-    // Deployment Entry Point
+    // Deployment
     // -----------------------------
     function createSingleWinnerLottery(
         string calldata name,
@@ -157,7 +143,12 @@ contract SingleWinnerDeployer {
         uint64 maxTickets,
         uint64 durationSeconds,
         uint32 minPurchaseAmount
-    ) external returns (address lotteryAddr) {
+    ) external nonReentrant returns (address lotteryAddr) {
+        
+        // Fail-Fast: Check if this deployer is actually authorized to register.
+        // Saves gas if the registry config is wrong, preventing deployment of unregistered contracts.
+        if (!registry.isRegistrar(address(this))) revert NotAuthorizedRegistrar();
+
         LotterySingleWinner lot = new LotterySingleWinner(
             address(registry),
             usdc,
@@ -175,11 +166,19 @@ contract SingleWinnerDeployer {
             minPurchaseAmount
         );
 
+        // Move funds from Creator -> Lottery (must be approved first)
         IERC20(usdc).safeTransferFrom(msg.sender, address(lot), winningPot);
+        
+        // Activate lottery (and sweep any excess dust)
         lot.confirmFunding();
+        
+        // Hand over admin rights to the Safe
         lot.transferOwnership(safeOwner);
 
         lotteryAddr = address(lot);
+        
+        // Emit explicit event for indexers
+        emit LotteryDeployed(lotteryAddr, msg.sender, winningPot, ticketPrice, name);
 
         registry.registerLottery(SINGLE_WINNER_TYPE_ID, lotteryAddr, msg.sender);
     }

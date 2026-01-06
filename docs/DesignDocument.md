@@ -69,6 +69,7 @@ The system is split into three on-chain components:
    - deploys a new `LotterySingleWinner` instance
    - transfers **admin ownership** to the Safe
    - registers the lottery in the registry
+   - emits `LotteryDeployed` for indexers
 
 3. **LotterySingleWinner**
    One instance = one lottery. It:
@@ -113,6 +114,7 @@ The system is split into three on-chain components:
 - Deploy `LotterySingleWinner`
 - Transfer its ownership to the **Safe** (admin owner)
 - Register the new lottery in the registry under `typeId = 1`
+- Emit `LotteryDeployed` event with metadata
 - Hold chain-specific config:
   - USDC address
   - Pyth Entropy contract
@@ -133,6 +135,7 @@ The system is split into three on-chain components:
 
 **Responsibilities**
 - Store lottery parameters (name, price, pot, min/max tickets, deadline)
+- Enforce sanity bounds on deployment (Max price $100k, Max pot $10M, Max duration 1 year)
 - Accept ticket purchases in USDC
 - Enforce anti-spam / storage controls
 - Trigger Pyth randomness request via `finalize()`
@@ -142,7 +145,7 @@ The system is split into three on-chain components:
   - creator revenue
   - protocol fees (to `feeRecipient`)
   - refunds on cancellation
-- Implement pull-based withdrawals: `withdrawFunds()`, `withdrawEth()`
+- Implement pull-based withdrawals: `withdrawFunds()`, `withdrawNative()`
 
 **Admin**
 - `owner()` is the **Safe**
@@ -230,7 +233,7 @@ LotterySingleWinner state machine:
 2. Creator calls `SingleWinnerDeployer.createSingleWinnerLottery(...)`.
 3. Deployer deploys `LotterySingleWinner`.
 4. Deployer transfers `winningPot` from Creator -> Lottery.
-5. Deployer calls `lottery.confirmFunding()` to activate it.
+5. Deployer calls `lottery.confirmFunding()` to activate it (and sweeps any excess USDC dust back to the creator).
 6. Deployer transfers lottery ownership to the Safe.
 7. Deployer registers lottery in Registry (`typeId = 1`).
 
@@ -251,10 +254,11 @@ LotterySingleWinner state machine:
 3. If expired and `sold < minTickets`:
    - Lottery canceled
    - Creator pot refund allocated
+   - **Msg.value (randomness fee) is refunded to caller immediately**
 4. Else:
    - Enters Drawing
    - Requests entropy callback
-   - Refunds overpayment (or allocates to `claimableEth` if refund fails)
+   - Refunds overpayment (or allocates to `claimableNative` if refund fails)
 
 ### Entropy Callback (Pick Winner)
 1. Pyth calls `entropyCallback(seq, provider, random)`.
@@ -270,7 +274,7 @@ LotterySingleWinner state machine:
 ### Withdraw Funds
 Pull-based payout:
 - `withdrawFunds()` transfers USDC owed to caller.
-- `withdrawEth()` transfers native token refunds (fee overpayment fallback).
+- `withdrawNative()` transfers native token (XTZ) refunds (fee overpayment fallback).
 
 ### Cancellation & Refunds
 Paths:
@@ -325,6 +329,8 @@ Protocol fees should go to an **external wallet** (treasury) and **not sit on th
 Use events to build a complete UI:
 - Registry:
   - `LotteryRegistered`
+- Deployer:
+  - `LotteryDeployed`
 - Lottery instances:
   - `TicketsPurchased`
   - `LotteryFinalized`

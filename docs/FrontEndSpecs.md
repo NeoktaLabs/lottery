@@ -54,7 +54,7 @@ Use these phrases consistently across the UI:
 What it does:
 - Stores every lottery address ever created on the platform
 - Stores `typeId` (numeric) and `creator` for each lottery
-- Helps the UI display “Verified” lotteries
+- Helps the UI display “Registered” lotteries
 
 What it does **not** do:
 - No gameplay logic
@@ -97,7 +97,7 @@ Important immutability rules:
 
 ### 3.1 Explore & join
 1. User opens **Explore**
-2. UI lists lotteries from the registry (verified)
+2. UI lists lotteries from the registry (registered)
 3. User opens a lottery
 4. User buys tickets (USDC approval if needed)
 
@@ -151,8 +151,8 @@ Important immutability rules:
   - Pot size, ticket price, tickets sold, time left
 
 **Authenticity / safety badge (important):**
-- Show ✅ **Verified** if `typeIdOf(lottery) != 0`
-- If the user manually pastes an address not in registry, show ⚠️ “Not verified”
+- Show ✅ **Registered** if `typeIdOf(lottery) != 0`
+- If the user manually pastes an address not in registry, show ⚠️ “Not registered”
 
 ### 4.2 Explore page: “By type”
 **Reads (LotteryRegistry):**
@@ -176,6 +176,15 @@ Important immutability rules:
 **Pre-checks (USDC token):**
 - `balanceOf(user)`
 - `allowance(user, deployerAddress)`
+
+**Logic for Minimum Purchase (Anti-Spam):**
+- **Constraint:** The contract requires every ticket purchase to be at least **$1 (1,000,000 USDC units)** to prevent storage spam.
+- **UI Logic:** - If `ticketPrice` < $1 (1.00 USDC):
+    - Automatically calculate required `minPurchaseAmount` so that `ticketPrice * minPurchaseAmount >= 1.00 USDC`.
+    - **Example:** If Price = $0.10, enforce `minPurchaseAmount = 10`.
+    - Show helper text: *"For tickets under $1, the minimum batch size is X."*
+  - If `ticketPrice` >= $1:
+    - `minPurchaseAmount` can be user-defined (default to 1).
 
 **UX copy (simple):**
 - Step 1: “Deposit prize pot (USDC)”
@@ -216,7 +225,7 @@ Always show these fields:
 User-specific reads:
 - `ticketsOwned(user)`
 - `claimableFunds(user)`
-- `claimableEth(user)`
+- `claimableNative(user)` (XTZ refunds)
 
 Helper reads:
 - `getMinTicketsToBuy()`
@@ -346,18 +355,18 @@ Use simple text:
 ### 7.2 What to read
 For the connected wallet:
 - `claimableFunds(user)` (USDC)
-- `claimableEth(user)` (XTZ refunds from overpaying finalize)
+- `claimableNative(user)` (XTZ refunds from overpaying finalize)
 - `ticketsOwned(user)` (only matters if canceled)
 
 ### 7.3 What to write
 - `withdrawFunds()`
-- `withdrawEth()`
+- `withdrawNative()`
 - `claimTicketRefund()` (only if canceled)
 
 ### 7.4 Best UX: “Claim all”
 Without an indexer:
 - Iterate recent lotteries from the registry (last N pages)
-- For each, check `claimableFunds(user)` and `claimableEth(user)`
+- For each, check `claimableFunds(user)` and `claimableNative(user)`
 - Offer a batched “Claim all” *in the UI* (sequential txs), with a progress indicator.
 
 ---
@@ -423,20 +432,26 @@ The UI should subscribe to events (or poll them via provider) for near real-time
 - `LotteryRegistered(index, typeId, lottery, creator)`  
   Use to instantly add new lottery to Explore without rescanning storage.
 
-### 9.2 Lottery events
+### 9.2 Deployer events
+**SingleWinnerDeployer:**
+- `LotteryDeployed(lottery, creator, winningPot, ticketPrice, name)`
+  Use for indexing new lotteries with rich metadata.
+
+### 9.3 Lottery events
 **LotterySingleWinner:**
 - `FundingConfirmed(funder, amount)` → “Lottery is live”
-- `TicketsPurchased(buyer, count, totalCost, totalSold)` → update sold, activity feed
+- `TicketsPurchased(buyer, count, totalCost, totalSold, rangeIndex, isNewRange)` → update sold, activity feed
+  - **Note:** If `isNewRange` is true, append a new range to local cache. If false, update the range at `rangeIndex`.
 - `LotteryFinalized(requestId, totalSold, provider)` → show “Drawing…”
 - `WinnerPicked(winner, winningTicketIndex, totalSold)` → show winner
 - `PrizeAllocated(user, amount, reason)` → show toast:
   - reason=1: “You won a prize!”
-  - reason=2: “Creator earnings are available”
+  - reason=2: “Creator earnings (or refund) available”
   - reason=3: “Refund available”
   - reason=4: “Platform fee allocated”
   - reason=5: “Prize pot refunded to creator”
 - `FundsClaimed(user, amount)` → “USDC claimed”
-- `EthRefundAllocated(user, amount)` / `EthClaimed(user, amount)` → show “XTZ refund”
+- `NativeRefundAllocated(user, amount)` / `NativeClaimed(user, amount)` → show “XTZ refund”
 - `LotteryCanceled(reason)` → show canceled banner with reason
 - `EmergencyRecovery()` → show “Emergency cancellation triggered”
 - `CallbackRejected(seq, reasonCode)` → log only (debug)
@@ -459,7 +474,7 @@ Suggested mapping:
 - `InsufficientFee` → “Randomness fee changed. Please try again.”
 - `RequestPending` → “A draw is already in progress.”
 - `NotDrawing` → “This lottery is not waiting for a draw result.”
-- `Wait24Hours` → “Please wait 24 hours before using the emergency option.”
+- `EarlyCancellationRequest` → “Please wait 24 hours before using the emergency option.”
 - `EmergencyHatchLocked` → “Emergency option is available after 7 days.”
 - `NothingToClaim` → “Nothing to claim right now.”
 - `NothingToRefund` → “No refund available for this wallet.”
@@ -493,7 +508,7 @@ Show honest UX copy:
 Provide a search box:
 - Paste a lottery address
 - Check registry `typeIdOf(address)`:
-  - if 0 → show “Not verified”
+  - if 0 → show “Not registered”
   - else → load details page
 
 ---
@@ -515,7 +530,7 @@ Provide a search box:
 - [ ] `createSingleWinnerLottery` (create flow)
 - [ ] Reads: `usdc`, `entropy`, `entropyProvider`, `feeRecipient`, `protocolFeePercent`
 - [ ] Admin: `setConfig`, `transferOwnership`
-- [ ] Events: `ConfigUpdated`
+- [ ] Events: `ConfigUpdated`, `LotteryDeployed`
 
 ### LotterySingleWinner
 - [ ] Reads: **all public fields** + `getSold`, `getMinTicketsToBuy`, `getTicketRangesCount`
@@ -525,9 +540,9 @@ Provide a search box:
 - [ ] Cancel: `cancel`
 - [ ] Emergency cancel: `forceCancelStuck`
 - [ ] Refund: `claimTicketRefund`
-- [ ] Claims: `withdrawFunds`, `withdrawEth`
+- [ ] Claims: `withdrawFunds`, `withdrawNative`
 - [ ] Admin: `pause`, `unpause`, `setEntropyProvider`, `setEntropyContract`
-- [ ] Events: all of them, especially `PrizeAllocated` and `FundingConfirmed`
+- [ ] Events: all of them, especially `PrizeAllocated`, `FundingConfirmed` and updated `TicketsPurchased`
 
 ---
 

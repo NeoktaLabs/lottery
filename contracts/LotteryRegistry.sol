@@ -4,15 +4,16 @@ pragma solidity ^0.8.24;
 /**
  * @title LotteryRegistry
  * @notice A minimal, “forever” on-chain registry for lottery instances.
+ * @dev This contract intentionally contains NO gameplay logic to ensure long-term stability.
+ * It only stores the addresses of deployed lotteries to help the frontend index them.
  */
 contract LotteryRegistry {
     // -----------------------------
-    // Errors (gas efficient)
+    // Errors
     // -----------------------------
     error NotOwner();
     error ZeroAddress();
     error NotRegistrar();
-    error InvalidPagination();
     error AlreadyRegistered();
     error InvalidTypeId(); // typeId cannot be 0
 
@@ -29,7 +30,7 @@ contract LotteryRegistry {
     );
 
     // -----------------------------
-    // Ownership (minimal Ownable)
+    // Ownership
     // -----------------------------
     address public owner;
 
@@ -53,22 +54,11 @@ contract LotteryRegistry {
     // -----------------------------
     // Registry State
     // -----------------------------
-    /// @notice List of all lotteries ever registered (across all types).
     address[] public allLotteries;
-
-    /// @notice Type id for each lottery address (0 means “not registered”).
     mapping(address => uint256) public typeIdOf;
-
-    /// @notice Creator address (UI display / attribution).
     mapping(address => address) public creatorOf;
-
-    /// @notice Timestamp when registered (helpful for UI ordering).
     mapping(address => uint64) public registeredAt;
-
-    /// @notice Per-type list of lottery addresses.
     mapping(uint256 => address[]) internal lotteriesByType;
-
-    /// @notice Authorized registrar contracts (deployer contracts) that can register lotteries.
     mapping(address => bool) public isRegistrar;
 
     modifier onlyRegistrar() {
@@ -77,7 +67,7 @@ contract LotteryRegistry {
     }
 
     // -----------------------------
-    // Owner-only governance
+    // Governance
     // -----------------------------
     function setRegistrar(address registrar, bool authorized) external onlyOwner {
         if (registrar == address(0)) revert ZeroAddress();
@@ -90,11 +80,7 @@ contract LotteryRegistry {
     // -----------------------------
     function registerLottery(uint256 typeId, address lottery, address creator) external onlyRegistrar {
         if (lottery == address(0) || creator == address(0)) revert ZeroAddress();
-        
-        // Safety: 0 is reserved for "unregistered"
         if (typeId == 0) revert InvalidTypeId();
-
-        // Since typeId cannot be 0, this is a safe "registered?" check.
         if (typeIdOf[lottery] != 0) revert AlreadyRegistered();
 
         allLotteries.push(lottery);
@@ -124,10 +110,9 @@ contract LotteryRegistry {
 
     function getAllLotteries(uint256 start, uint256 limit) external view returns (address[] memory page) {
         uint256 n = allLotteries.length;
-        if (start > n) revert InvalidPagination();
-
-        // FIX: Must use [] brackets for array initialization
-        if (start == n || limit == 0) {
+        
+        // Return empty if out of bounds (Frontend friendly behavior)
+        if (start >= n || limit == 0) {
             return new address[](0);
         }
 
@@ -147,10 +132,9 @@ contract LotteryRegistry {
     {
         address[] storage arr = lotteriesByType[typeId];
         uint256 n = arr.length;
-        if (start > n) revert InvalidPagination();
 
-        // FIX: Must use [] brackets for array initialization
-        if (start == n || limit == 0) {
+        // Return empty if out of bounds (Frontend friendly behavior)
+        if (start >= n || limit == 0) {
             return new address[](0);
         }
 
