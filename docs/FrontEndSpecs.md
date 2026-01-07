@@ -1,4 +1,4 @@
-# Neokta Lottery — Frontend Specification (Full Contract Coverage)
+# Neokta Lottery — Frontend Specification (v2 - Mainnet Ready)
 
 This document tells a web developer **exactly** what to build to ship a **smooth, non-technical** lottery UI on **Etherlink Mainnet (Tezos L2)**.
 
@@ -180,11 +180,11 @@ Important immutability rules:
 **Logic for Minimum Purchase (Anti-Spam):**
 - **Constraint:** The contract requires every ticket purchase to be at least **$1 (1,000,000 USDC units)** to prevent storage spam.
 - **UI Logic:** - If `ticketPrice` < $1 (1.00 USDC):
-    - Automatically calculate required `minPurchaseAmount` so that `ticketPrice * minPurchaseAmount >= 1.00 USDC`.
-    - **Example:** If Price = $0.10, enforce `minPurchaseAmount = 10`.
-    - Show helper text: *"For tickets under $1, the minimum batch size is X."*
-  - If `ticketPrice` >= $1:
-    - `minPurchaseAmount` can be user-defined (default to 1).
+        - Automatically calculate required `minPurchaseAmount` so that `ticketPrice * minPurchaseAmount >= 1.00 USDC`.
+        - **Example:** If Price = $0.10, enforce `minPurchaseAmount = 10`.
+        - Show helper text: *"For tickets under $1, the minimum batch size is X."*
+    - If `ticketPrice` >= $1:
+        - `minPurchaseAmount` can be user-defined (default to 1).
 
 **UX copy (simple):**
 - Step 1: “Deposit prize pot (USDC)”
@@ -267,7 +267,7 @@ Show:
 #### D) Completed
 Show:
 - Winner address: `winner()`
-- If the UI has the `WinnerPicked` event, show “Winning ticket #…”
+- **Winner Index Display:** The contract event `WinnerPicked` returns a 0-based index. **Add 1** to display it as "Winning Ticket #100" instead of #99 for better UX.
 - Claims module (winner/creator/feeRecipient may have claimable funds)
 
 #### E) Canceled
@@ -364,10 +364,17 @@ For the connected wallet:
 - `claimTicketRefund()` (only if canceled)
 
 ### 7.4 Best UX: “Claim all”
-Without an indexer:
-- Iterate recent lotteries from the registry (last N pages)
-- For each, check `claimableFunds(user)` and `claimableNative(user)`
-- Offer a batched “Claim all” *in the UI* (sequential txs), with a progress indicator.
+**Handling Multiple Claims:**
+- A user may have both **USDC** (prize) and **XTZ** (gas refund) to claim.
+- The UI should check both `claimableFunds` and `claimableNative`.
+- **Button Logic:**
+    - If both > 0: Show "Claim All" (triggers 2 separate transactions sequentially, or warn user they need to sign twice).
+    - If only one > 0: Show "Claim USDC" or "Claim Refund".
+
+**No Indexer Approach:**
+- Iterate recent lotteries from the registry (last N pages).
+- For each, check balances.
+- Offer a batched list of claims.
 
 ---
 
@@ -409,15 +416,22 @@ Writes:
 - `pause()`, `unpause()`
 - `setEntropyProvider(p)` (guarded by `activeDrawings == 0`)
 - `setEntropyContract(e)` (guarded by `activeDrawings == 0`)
+- **`sweepSurplus(to)`** (Recover accidental transfers)
 
 Reads:
 - `owner()`
 - `paused()`
 - `activeDrawings()`
+- `totalReservedUSDC`, `usdc.balanceOf(lottery)`
 
 UX:
-- These controls are advanced; hide them under “Safety / Advanced”
-- Provide very clear warnings (“Only use if instructed by the team.”)
+- **Surplus Sweep Panel:**
+    - Calculate `Surplus = Balance - totalReservedUSDC`.
+    - If `Surplus > 0`, enable "Sweep Surplus" button + destination input.
+    - Helper text: *"Recover funds sent to this contract by mistake."*
+- **Safety Controls:**
+    - These controls are advanced; hide them under “Safety / Advanced”.
+    - Provide very clear warnings (“Only use if instructed by the team.”).
 
 > Note: **protocol fee % and feeRecipient are NOT changeable on existing lottery instances.** They are fixed at deployment.
 
@@ -455,6 +469,7 @@ The UI should subscribe to events (or poll them via provider) for near real-time
 - `LotteryCanceled(reason)` → show canceled banner with reason
 - `EmergencyRecovery()` → show “Emergency cancellation triggered”
 - `CallbackRejected(seq, reasonCode)` → log only (debug)
+- `SurplusSwept(to, amount)` → log administrative action.
 
 ---
 
@@ -541,7 +556,7 @@ Provide a search box:
 - [ ] Emergency cancel: `forceCancelStuck`
 - [ ] Refund: `claimTicketRefund`
 - [ ] Claims: `withdrawFunds`, `withdrawNative`
-- [ ] Admin: `pause`, `unpause`, `setEntropyProvider`, `setEntropyContract`
+- [ ] Admin: `pause`, `unpause`, `setEntropyProvider`, `setEntropyContract`, `sweepSurplus`
 - [ ] Events: all of them, especially `PrizeAllocated`, `FundingConfirmed` and updated `TicketsPurchased`
 
 ---

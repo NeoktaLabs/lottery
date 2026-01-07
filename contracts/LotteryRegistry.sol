@@ -5,7 +5,6 @@ pragma solidity ^0.8.24;
  * @title LotteryRegistry
  * @notice A minimal, “forever” on-chain registry for lottery instances.
  * @dev This contract intentionally contains NO gameplay logic to ensure long-term stability.
- * It only stores the addresses of deployed lotteries to help the frontend index them.
  */
 contract LotteryRegistry {
     // -----------------------------
@@ -15,7 +14,7 @@ contract LotteryRegistry {
     error ZeroAddress();
     error NotRegistrar();
     error AlreadyRegistered();
-    error InvalidTypeId(); // typeId cannot be 0
+    error InvalidTypeId();
 
     // -----------------------------
     // Events
@@ -110,12 +109,9 @@ contract LotteryRegistry {
 
     function getAllLotteries(uint256 start, uint256 limit) external view returns (address[] memory page) {
         uint256 n = allLotteries.length;
-        
-        // Return empty if out of bounds (Frontend friendly behavior)
         if (start >= n || limit == 0) {
             return new address[](0);
         }
-
         uint256 end = start + limit;
         if (end > n) end = n;
 
@@ -132,12 +128,9 @@ contract LotteryRegistry {
     {
         address[] storage arr = lotteriesByType[typeId];
         uint256 n = arr.length;
-
-        // Return empty if out of bounds (Frontend friendly behavior)
         if (start >= n || limit == 0) {
             return new address[](0);
         }
-
         uint256 end = start + limit;
         if (end > n) end = n;
 

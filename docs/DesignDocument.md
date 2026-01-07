@@ -1,4 +1,4 @@
-# Design Document: Etherlink Single Winner Lottery (Mainnet Ready)
+# Design Document: Etherlink Single Winner Lottery (v2 - Mainnet Ready)
 
 ## Table of Contents
 
@@ -19,13 +19,11 @@
   - [Entropy Callback (Pick Winner)](#entropy-callback-pick-winner)
   - [Withdraw Funds](#withdraw-funds)
   - [Cancellation & Refunds](#cancellation--refunds)
+  - [Sweep Surplus (Admin)](#sweep-surplus-admin)
 - [Protocol Fees & External Fee Recipient](#protocol-fees--external-fee-recipient)
-- [Automation / Serverless Finalizer](#automation--serverless-finalizer)
-- [Indexing & Frontend Data Strategy](#indexing--frontend-data-strategy)
 - [Security Model & Audit Notes](#security-model--audit-notes)
 - [Gas & Performance Notes](#gas--performance-notes)
 - [Operational Playbooks](#operational-playbooks)
-- [Future Expansion: New Lottery Types](#future-expansion-new-lottery-types)
 
 ---
 
@@ -58,6 +56,8 @@ Etherlink is a **Tezos Layer 2 with EVM compatibility**, chosen for:
 
 The system is split into three on-chain components:
 
+
+
 1. **LotteryRegistry**
    Minimal, stable, “forever” contract that stores:
    - all deployed lottery addresses
@@ -66,17 +66,18 @@ The system is split into three on-chain components:
 
 2. **SingleWinnerDeployer**
    Type-specific deployer/registrar authorized by the registry owner (Safe). It:
+   - packs configuration into a `LotteryParams` struct (to avoid stack-too-deep errors)
    - deploys a new `LotterySingleWinner` instance
    - transfers **admin ownership** to the Safe
    - registers the lottery in the registry
-   - emits `LotteryDeployed` for indexers
+   - emits `LotteryDeployed` containing full configuration metadata for indexers
 
 3. **LotterySingleWinner**
    One instance = one lottery. It:
    - receives ticket purchases in USDC
    - requests randomness from Pyth
    - allocates winnings/revenue/fees into claimable balances
-   - supports emergency cancellation and refunds
+   - supports emergency cancellation, refunds, and surplus sweeping
 
 ---
 
@@ -111,16 +112,12 @@ The system is split into three on-chain components:
 **Purpose:** deploy and register single-winner lotteries, without changing the registry.
 
 **Responsibilities**
-- Deploy `LotterySingleWinner`
-- Transfer its ownership to the **Safe** (admin owner)
-- Register the new lottery in the registry under `typeId = 1`
-- Emit `LotteryDeployed` event with metadata
-- Hold chain-specific config:
-  - USDC address
-  - Pyth Entropy contract
-  - Entropy provider
-  - Safe owner
-  - **Protocol fee recipient** (external wallet)
+- Pack arguments into `LotteryParams` struct.
+- Deploy `LotterySingleWinner`.
+- Transfer its ownership to the **Safe** (admin owner).
+- Register the new lottery in the registry under `typeId = 1`.
+- Emit `LotteryDeployed` event with extended metadata (USDC address, Entropy provider, Fee recipient).
+- Hold chain-specific config for new deployments.
 
 **Admin**
 - `owner` is the **Safe**
@@ -137,21 +134,21 @@ The system is split into three on-chain components:
 - Store lottery parameters (name, price, pot, min/max tickets, deadline)
 - Enforce sanity bounds on deployment (Max price $100k, Max pot $10M, Max duration 1 year)
 - Accept ticket purchases in USDC
-- Enforce anti-spam / storage controls
-- Trigger Pyth randomness request via `finalize()`
-- Receive randomness via `entropyCallback()`
-- Allocate USDC balances into:
-  - winner prize
-  - creator revenue
-  - protocol fees (to `feeRecipient`)
-  - refunds on cancellation
-- Implement pull-based withdrawals: `withdrawFunds()`, `withdrawNative()`
+- **Randomness:** Trigger Pyth request via `finalize()`, receive via `entropyCallback()`
+- **Accounting:**
+  - `totalReservedUSDC` (Public): Tracks liabilities.
+  - `totalClaimableNative` (Public): Tracks gas refunds.
+- **Funds Management:**
+  - Allocate winner prize, creator revenue, protocol fees.
+  - Pull-based withdrawals: `withdrawFunds()`, `withdrawNative()`.
+  - Surplus Recovery: `sweepSurplus(to)` allows admin to recover accidental transfers.
 
 **Admin**
 - `owner()` is the **Safe**
 - Safe can:
   - pause/unpause
   - set entropy provider/contract (only if no active drawings)
+  - sweep surplus funds (balance > reserved)
 - **Note:** `feeRecipient` and `protocolFeePercent` are **immutable** for the lifecycle of the specific lottery instance.
 
 ---
@@ -178,7 +175,8 @@ Use these values when deploying `SingleWinnerDeployer` to **Etherlink Mainnet**.
 Controls:
 - Registry ownership (registrar authorization)
 - Deployer config (global settings for new lotteries)
-- Lottery instance admin knobs (pause / oracle config)
+- Lottery instance admin knobs (pause / oracle config / surplus sweep)
+- **Cannot** change fee recipient on *active* lotteries.
 
 ### Fee Recipient (External Wallet)
 - Receives protocol fees via `claimableFunds[feeRecipient]`
@@ -190,23 +188,20 @@ Controls:
 - Calls deployer to create a new lottery
 - Funds the pot at deployment (via Deployer approval flow)
 - Receives ticket revenue (minus protocol fee) after completion
-- Cannot buy tickets in own lottery
+- Cannot buy tickets in own lottery (enforced on-chain)
 
 ### Participants
 - Buy tickets in USDC
 - May finalize the lottery (permissionless)
 - If lottery canceled, can claim refunds and withdraw
 
-### Optional Automation Bot (Serverless / Cron)
-- Calls `finalize()` when eligible (improves UX/liveness)
-- No special permissions
-- No trust required (permissionless)
-
 ---
 
 ## Lifecycle & Status Model
 
 LotterySingleWinner state machine:
+
+
 
 - **FundingPending**
   - Lottery deployed but not yet funded by deployer
@@ -216,13 +211,16 @@ LotterySingleWinner state machine:
 - **Drawing**
   - Randomness requested from Pyth
   - Awaiting callback
+  - `activeDrawings` increments to 1
+  - Governance Lock enabled (cannot change Entropy config)
 - **Completed**
   - Winner selected
   - Funds allocated to claimable balances
 - **Canceled**
-  - Min tickets not reached at expiry OR emergency hatch triggered
+  - Min tickets not reached OR emergency hatch triggered
   - Refunds become claimable for users
   - Creator pot refund allocated
+  - `activeDrawings` decremented if cancellation occurred during Drawing state
 
 ---
 
@@ -231,7 +229,7 @@ LotterySingleWinner state machine:
 ### Create Lottery
 1. Creator approves `SingleWinnerDeployer` to spend `winningPot`.
 2. Creator calls `SingleWinnerDeployer.createSingleWinnerLottery(...)`.
-3. Deployer deploys `LotterySingleWinner`.
+3. Deployer packs params -> deploys `LotterySingleWinner`.
 4. Deployer transfers `winningPot` from Creator -> Lottery.
 5. Deployer calls `lottery.confirmFunding()` to activate it (and sweeps any excess USDC dust back to the creator).
 6. Deployer transfers lottery ownership to the Safe.
@@ -287,6 +285,12 @@ Refunds:
 - Creator pot refund allocated once → creator withdraws.
 - Ticket buyers call `claimTicketRefund()` → allocation → withdraw.
 
+### Sweep Surplus (Admin)
+- Admin calls `sweepSurplus(to)`.
+- Checks `balanceOf(this) > totalReservedUSDC`.
+- Transfers difference to `to`.
+- **Purpose:** Recover accidental user transfers or dust.
+
 ---
 
 ## Protocol Fees & External Fee Recipient
@@ -306,55 +310,17 @@ Protocol fees should go to an **external wallet** (treasury) and **not sit on th
 
 ---
 
-## Automation / Serverless Finalizer
-
-**Problem (liveness):** If nobody calls `finalize()`, funds can remain stuck in Open state.
-
-**Solution:** a serverless cron / worker:
-- Watches for eligible lotteries (deadline passed / maxTickets reached)
-- Calls `finalize()` with a slight fee buffer
-
-**Security impact:**
-- Minimal additional risk
-- Bot is not trusted and has no privileged permissions
-
-**Fee fluctuation note:**
-- Pyth fee is dynamic → bot should overpay slightly; contract refunds excess.
-
----
-
-## Indexing & Frontend Data Strategy
-
-### With an Indexer (recommended)
-Use events to build a complete UI:
-- Registry:
-  - `LotteryRegistered`
-- Deployer:
-  - `LotteryDeployed`
-- Lottery instances:
-  - `TicketsPurchased`
-  - `LotteryFinalized`
-  - `WinnerPicked`
-  - `RefundAllocated`
-  - `FundsClaimed`
-  - (Optional) `PrizeAllocated` for richer UX
-
-### Without an Indexer
-Still possible:
-- Read registry arrays via pagination
-- Query each lottery instance state (status, winner, deadline, etc.)
-
----
-
 ## Security Model & Audit Notes
 
-- **Randomness:** Pyth Entropy, callback verified (caller, request id, provider)
-- **Pull payouts:** Avoids push-payment DoS and callback griefing
-- **Reentrancy:** `ReentrancyGuard` + CEI style + `SafeERC20`
-- **Storage spam control:** $1 minimum for new ranges, range compression
-- **Emergency hatch:** Prevents stuck funds if callback never arrives
+- **Stack Depth:** Constructor uses `LotteryParams` struct to prevent "Stack Too Deep" errors.
+- **Randomness:** Pyth Entropy, callback verified (caller, request id, provider).
+- **Pull payouts:** Avoids push-payment DoS and callback griefing.
+- **Reentrancy:** `ReentrancyGuard` + CEI style + `SafeERC20`.
+- **Accounting:** `totalReservedUSDC` invariant ensures contract never pays out more than owed.
+- **Storage spam control:** $1 minimum for new ranges, range compression.
+- **Emergency hatch:** Prevents stuck funds if callback never arrives.
 - **Governance Lock:** Oracle settings cannot be changed while `activeDrawings > 0`.
-- **Invariant checks:** Liability counter (`totalReservedUSDC`) vs actual balance
+- **Surplus Sweep:** Protected function to recover funds sent to contract by mistake.
 
 ---
 
@@ -363,6 +329,7 @@ Still possible:
 - Tickets stored as **cumulative ranges** rather than per-ticket arrays.
 - Winner lookup is **binary search**: `O(log n)`.
 - Batch buys update a single range slot instead of storing many entries.
+- **Optimization:** Registry address removed from Lottery contract to save storage/bytecode.
 
 ---
 
@@ -386,17 +353,7 @@ Still possible:
    - Safe calls `LotterySingleWinner.setEntropyProvider(...)` or `setEntropyContract(...)`.
    - **Constraint:** This transaction will revert if `activeDrawings > 0`.
 
----
-
-## Future Expansion: New Lottery Types
-
-Registry is numeric `typeId` based:
-- `1 = single winner`
-- `2 = multi-winner`
-- `3 = guess number`
-- ...
-
-To add new type later:
-1. Deploy a new deployer (e.g. `MultiWinnerDeployer`).
-2. Safe authorizes it in `LotteryRegistry` via `setRegistrar(newDeployer, true)`.
-3. Frontend continues reading the same registry address (no redeploy needed).
+### Recovering Accidental Transfers
+1. Check `totalReservedUSDC` (public var) vs `usdc.balanceOf(lottery)`.
+2. Safe calls `sweepSurplus(destinationAddress)`.
+3. Excess funds are transferred to the destination.

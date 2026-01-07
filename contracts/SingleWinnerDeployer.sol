@@ -8,32 +8,31 @@ import "./LotterySingleWinner.sol";
 
 /**
  * @title SingleWinnerDeployer
- * @notice Deploys LotterySingleWinner instances, handles initial funding, 
- * and registers them in the central LotteryRegistry.
+ * @notice Deploys LotterySingleWinner instances.
  */
 contract SingleWinnerDeployer is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    // -----------------------------
     // Errors
-    // -----------------------------
     error NotOwner();
     error ZeroAddress();
     error FeeTooHigh();
     error NotAuthorizedRegistrar();
 
-    // -----------------------------
     // Events
-    // -----------------------------
     event DeployerOwnershipTransferred(address indexed oldOwner, address indexed newOwner);
-
-    // Emitted for indexers to easily track new lottery deployments with metadata
+    
     event LotteryDeployed(
         address indexed lottery, 
         address indexed creator, 
         uint256 winningPot, 
         uint256 ticketPrice, 
-        string name
+        string name,
+        address usdc,
+        address entropy,
+        address entropyProvider,
+        address feeRecipient,
+        uint256 protocolFeePercent
     );
 
     event ConfigUpdated(
@@ -44,9 +43,6 @@ contract SingleWinnerDeployer is ReentrancyGuard {
         uint256 protocolFeePercent
     );
 
-    // -----------------------------
-    // Ownership
-    // -----------------------------
     address public owner;
 
     modifier onlyOwner() {
@@ -54,15 +50,12 @@ contract SingleWinnerDeployer is ReentrancyGuard {
         _;
     }
 
-    // -----------------------------
-    // Config
-    // -----------------------------
     LotteryRegistry public immutable registry;
     address public immutable safeOwner;
 
     uint256 public constant SINGLE_WINNER_TYPE_ID = 1;
 
-    // These settings apply to NEW lotteries only. Existing lotteries are immutable.
+    // Config
     address public usdc;
     address public entropy;
     address public entropyProvider;
@@ -132,9 +125,6 @@ contract SingleWinnerDeployer is ReentrancyGuard {
         owner = newOwner;
     }
 
-    // -----------------------------
-    // Deployment
-    // -----------------------------
     function createSingleWinnerLottery(
         string calldata name,
         uint256 ticketPrice,
@@ -145,40 +135,45 @@ contract SingleWinnerDeployer is ReentrancyGuard {
         uint32 minPurchaseAmount
     ) external nonReentrant returns (address lotteryAddr) {
         
-        // Fail-Fast: Check if this deployer is actually authorized to register.
-        // Saves gas if the registry config is wrong, preventing deployment of unregistered contracts.
         if (!registry.isRegistrar(address(this))) revert NotAuthorizedRegistrar();
 
-        LotterySingleWinner lot = new LotterySingleWinner(
-            address(registry),
-            usdc,
-            entropy,
-            entropyProvider,
-            feeRecipient,
-            protocolFeePercent,
-            msg.sender, // creator
-            name,
-            ticketPrice,
-            winningPot,
-            minTickets,
-            maxTickets,
-            durationSeconds,
-            minPurchaseAmount
-        );
+        // Pack parameters into struct to avoid Stack Too Deep error
+        LotterySingleWinner.LotteryParams memory params = LotterySingleWinner.LotteryParams({
+            usdcToken: usdc,
+            entropy: entropy,
+            entropyProvider: entropyProvider,
+            feeRecipient: feeRecipient,
+            protocolFeePercent: protocolFeePercent,
+            creator: msg.sender,
+            name: name,
+            ticketPrice: ticketPrice,
+            winningPot: winningPot,
+            minTickets: minTickets,
+            maxTickets: maxTickets,
+            durationSeconds: durationSeconds,
+            minPurchaseAmount: minPurchaseAmount
+        });
 
-        // Move funds from Creator -> Lottery (must be approved first)
+        LotterySingleWinner lot = new LotterySingleWinner(params);
+
         IERC20(usdc).safeTransferFrom(msg.sender, address(lot), winningPot);
-        
-        // Activate lottery (and sweep any excess dust)
         lot.confirmFunding();
-        
-        // Hand over admin rights to the Safe
         lot.transferOwnership(safeOwner);
 
         lotteryAddr = address(lot);
         
-        // Emit explicit event for indexers
-        emit LotteryDeployed(lotteryAddr, msg.sender, winningPot, ticketPrice, name);
+        emit LotteryDeployed(
+            lotteryAddr, 
+            msg.sender, 
+            winningPot, 
+            ticketPrice, 
+            name,
+            usdc,
+            entropy,
+            entropyProvider,
+            feeRecipient,
+            protocolFeePercent
+        );
 
         registry.registerLottery(SINGLE_WINNER_TYPE_ID, lotteryAddr, msg.sender);
     }
