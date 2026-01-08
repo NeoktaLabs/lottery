@@ -1,4 +1,5 @@
-# 🤖 Neokta Lottery Finalizer Bot — Design Document
+# Design Document: 뽑기 (Ppopgi) — Finalizer Bot
+
 
 **Network:** Etherlink Mainnet (Chain ID 42793)  
 **Runtime:** Cloudflare Workers (Cron)  
