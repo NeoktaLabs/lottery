@@ -1,10 +1,8 @@
-# frontend-ux-product-spec.md
-
-# **Ppopgi (뽑기)** — Frontend UX & Product Specification
-**Version:** Final UX Gold  
-**Audience:** UI/UX designers, frontend developers  
-**Network:** Etherlink (Tezos L2)  
-**Tone:** Friendly, safe, playful, non-technical  
+# Ppopgi (뽑기) — Frontend UX & Product Specification
+**Version:** Final UX Gold
+**Audience:** UI/UX designers, frontend developers
+**Network:** Etherlink (Tezos L2)
+**Tone:** Friendly, safe, playful, non-technical
 **Core Rule:** *Never make users feel like they are gambling or dealing with blockchain*
 
 ---
@@ -108,8 +106,7 @@ Explain **why two coins are needed**, without mentioning blockchain.
 ### Cashier Modal Content
 Friendly explanation:
 
-> **Welcome to the Coin Cashier 🏪**  
->  
+> **Welcome to the Coin Cashier 🏪** >  
 > 🎟 **Entry Coins** let you play raffles  
 > ⚡ **Energy Coins** help the park run smoothly  
 >  
@@ -130,8 +127,7 @@ Friendly explanation:
 - Blocks the site until accepted
 
 ### Copy (Friendly but Clear)
-> **Before you enter 🎟️**  
->  
+> **Before you enter 🎟️** >  
 > Ppopgi is an experimental platform.  
 > The system has been carefully reviewed and tested, but it has **not been officially audited**.  
 >  

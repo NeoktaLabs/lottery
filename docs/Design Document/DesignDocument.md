@@ -78,7 +78,7 @@ The system is split into three on-chain components:
    - requests randomness from Pyth
    - allocates winnings/revenue/fees into claimable balances
    - supports emergency cancellation, refunds, and surplus sweeping
-   - **Accounting:** Uses a strict "Escrowed Liabilities" model.
+   - **Accounting:** Uses a dual "Escrowed Liabilities" model for both USDC and Native (XTZ) tokens.
    - **Security:** Implements "Nuclear CEI" (Check-Effect-Interaction with Balance Delta verification).
 
 ---
@@ -139,14 +139,16 @@ The system is split into three on-chain components:
 - Accept ticket purchases in USDC
 - **Randomness:** Trigger Pyth request via `finalize()`, receive via `entropyCallback()`
 - **Accounting (Escrowed Liabilities Model):**
-  - `totalReservedUSDC` (Public): Tracks funds that **must** be paid out (Winning Pot + Gross Ticket Revenue + Fees).
-  - **Invariant:** `usdc.balanceOf(this) >= totalReservedUSDC`
-  - Withdrawal safety: Explicitly reverts if `totalReservedUSDC < amount` to prevent insolvency.
-  - **Note:** Excess funding (surplus) is NOT automatically allocated to the creator; it remains as sweepable surplus.
+  - **USDC:** `totalReservedUSDC` tracks funds that **must** be paid out (Winning Pot + Gross Ticket Revenue + Fees).
+  - **Native (XTZ):** `totalClaimableNative` tracks gas refunds owed to users.
+  - **Invariant:** `usdc.balanceOf(this) >= totalReservedUSDC` AND `address(this).balance >= totalClaimableNative`.
+  - Withdrawal safety: Explicitly reverts if liabilities are exceeded.
 - **Funds Management:**
   - Allocate winner prize, creator revenue, protocol fees.
-  - Pull-based withdrawals: `withdrawFunds()`, `withdrawNative()`.
-  - Surplus Recovery: `sweepSurplus(to)` allows admin to recover accidental transfers *above* the reserved amount.
+  - Pull-based withdrawals: `withdrawFunds()` (USDC), `withdrawNative()` (XTZ).
+  - **Surplus Recovery:**
+    - `sweepSurplus(to)`: Recovers excess USDC above `totalReservedUSDC`.
+    - `sweepNativeSurplus(to)`: Recovers excess Native tokens above `totalClaimableNative`.
 
 **Admin**
 - `owner()` is the **Safe**
@@ -222,7 +224,8 @@ LotterySingleWinner state machine:
   - Funds allocated to claimable balances
 - **Canceled**
   - Min tickets not reached OR emergency hatch triggered
-  - Refunds become claimable for users
+  - **State Frozen:** `soldAtCancel` and `canceledAt` record the exact state at failure.
+  - Refunds become claimable for users based on this snapshot
   - Creator pot refund allocated
   - `activeDrawings` decremented if cancellation occurred during Drawing state
 
@@ -235,7 +238,8 @@ LotterySingleWinner state machine:
 2. Creator calls `SingleWinnerDeployer.createSingleWinnerLottery(...)`.
 3. Deployer packs params -> deploys `LotterySingleWinner`.
 4. Deployer transfers `winningPot` from Creator -> Lottery.
-5. Deployer calls `lottery.confirmFunding()` to activate it (sets `totalReservedUSDC = winningPot`).
+5. Deployer calls `lottery.confirmFunding()` to activate it.
+   - **Validation:** Checks `usdc.balanceOf(this) == winningPot`. (Strict equality prevents creators from accidentally over-funding and losing the excess).
 6. Deployer transfers lottery ownership to the Safe.
 7. Deployer attempts to register lottery in Registry.
    - **Success:** Normal flow.
@@ -261,7 +265,7 @@ LotterySingleWinner state machine:
 3. If expired and `sold < minTickets`:
    - Lottery canceled.
    - Creator pot refund allocated.
-   - **Msg.value (randomness fee) is refunded to caller immediately.**
+   - **Msg.value (randomness fee) is refunded to caller immediately via `_safeNativeTransfer`.**
 4. Else:
    - **Snapshot:** `soldAtDrawing = getSold()`.
    - Enters Drawing.
@@ -287,6 +291,7 @@ Pull-based payout:
 - `withdrawFunds()` transfers USDC owed to caller.
   - **Strict Check:** Reverts if `totalReservedUSDC < amount` (Protects against accounting drift).
 - `withdrawNative()` transfers native token (XTZ) refunds.
+  - **Strict Check:** Reverts if `totalClaimableNative < amount`.
 
 ### Cancellation & Refunds
 Paths:
@@ -296,15 +301,19 @@ Paths:
   - Anyone after 7 days (`PUBLIC_HATCH_DELAY`)
 
 Refunds:
+- **Snapshot:** `soldAtCancel` and `canceledAt` are recorded.
 - Creator pot refund allocated once → creator withdraws.
 - Ticket buyers call `claimTicketRefund()` → allocation → withdraw.
-- **Event:** Emits `LotteryCanceled(reason, soldSnapshot, revenue, potRefund)` for indexer clarity.
+- **Event:** Emits `LotteryCanceled(reason, soldSnapshot, ticketRevenue, potRefund)` for indexer clarity.
 
 ### Sweep Surplus (Admin)
-- Admin calls `sweepSurplus(to)`.
-- Checks `balanceOf(this) > totalReservedUSDC`.
-- Transfers difference to `to`.
-- **Purpose:** Recover accidental user transfers or dust without touching game funds.
+- **USDC:** Admin calls `sweepSurplus(to)`.
+  - Checks `balanceOf(this) > totalReservedUSDC`.
+  - Transfers difference to `to`.
+- **Native (XTZ):** Admin calls `sweepNativeSurplus(to)`.
+  - Checks `address(this).balance > totalClaimableNative`.
+  - Transfers difference to `to`.
+- **Purpose:** Recover accidental user transfers or dust without touching game funds or user refunds.
 
 ### Rescue Registration (Admin)
 - If `RegistrationFailed` event was observed:
@@ -330,9 +339,10 @@ Protocol fees should go to an **external wallet** (treasury) and **not sit on th
 ## Security Model & Audit Notes
 
 - **Escrowed Liabilities Model:** `totalReservedUSDC` tracks obligations. The contract explicitly prevents withdrawing more than is owed, ensuring solvency even if the contract holds excess funds.
+- **Dual-Solvency Accounting:** Just as `totalReservedUSDC` tracks ERC20 liabilities, `totalClaimableNative` tracks native token liabilities (gas refunds). This allows the admin to safely sweep accidental native deposits (`sweepNativeSurplus`) without endangering user funds.
 - **Nuclear CEI:** `buyTickets` updates state before transfer, AND explicitly checks the token balance delta to prevent "Ghost Ticket" attacks (where a token might return success but transfer nothing).
 - **Hard Caps:** `HARD_CAP_TICKETS` (10M) prevents storage griefing attacks that could make binary search too expensive.
-- **State Freezing:** `soldAtDrawing` locks the participant count during the async randomness request, preventing any potential logic drift during the wait period.
+- **State Freezing:** `soldAtDrawing` (and `soldAtCancel`) locks the participant count during the async randomness request or cancellation, preventing any potential logic drift during state transitions.
 - **Fault Tolerance:** The Deployer `try/catch` block ensures that a Registry failure does not cause the Lottery deployment (and funding) to revert, preventing "stuck funds" scenarios during creation.
 - **Replay Protection:** Uses **Context Verification**. The callback validates `sequenceNumber == entropyRequestId` and `provider == selectedProvider`. `entropyRequestId` is zeroed on success.
 
@@ -362,9 +372,10 @@ Protocol fees should go to an **external wallet** (treasury) and **not sit on th
 3. Existing lotteries will continue to pay the old address until they conclude.
 
 ### Recovering Accidental Transfers
-1. Check `totalReservedUSDC` (public var) vs `usdc.balanceOf(lottery)`.
+1. Check `totalReservedUSDC` vs `usdc.balanceOf(lottery)`.
 2. Safe calls `sweepSurplus(destinationAddress)`.
 3. Excess funds are transferred to the destination.
+4. (Repeat for Native/XTZ using `sweepNativeSurplus`).
 
 ### Rescuing Failed Registration
 If a lottery was deployed but the Registry transaction failed:

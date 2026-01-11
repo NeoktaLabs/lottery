@@ -1,8 +1,6 @@
-# frontend-technical-spec.md
-
 # Ppopgi (뽑기) — Frontend Technical Specification (Etherlink Mainnet)
-**Version:** v1.1 (Aligned to pasted Solidity: `LotteryRegistry`, `SingleWinnerDeployer`, `LotterySingleWinner` v1.5)  
-**Audience:** Frontend engineers, blockchain integrators  
+**Version:** v1.2
+**Audience:** Frontend engineers, blockchain integrators
 **Goal:** Ship a smooth, correct, safe dApp UI that maps **1:1** to the deployed contracts on **Etherlink Mainnet**
 
 ---
@@ -150,6 +148,8 @@ Block Create & Buy actions behind a checkbox:
 - `entropyRequestId()`
 - `drawingRequestedAt()`
 - `soldAtDrawing()`
+- `soldAtCancel()` (**New v1.6**: snapshot for canceled UI)
+- `canceledAt()` (**New v1.6**)
 - `entropyProvider()` (current provider)
 - `selectedProvider()` (provider used for current draw)
 - `activeDrawings()`
@@ -175,7 +175,8 @@ Block Create & Buy actions behind a checkbox:
 - `withdrawNative()`
 - `cancel()` (when expired + min not reached)
 - `forceCancelStuck()` (Drawing + after delay)
-- `sweepSurplus(to)` (owner-only)
+- `sweepSurplus(to)` (owner-only, USDC)
+- `sweepNativeSurplus(to)` (owner-only, **New v1.6**, XTZ)
 - `setEntropyProvider(p)` (owner-only, requires no active drawings)
 - `setEntropyContract(e)` (owner-only, requires no active drawings)
 - `pause()` / `unpause()` (owner-only)
@@ -190,12 +191,13 @@ Block Create & Buy actions behind a checkbox:
   - `3` participant refund
   - `4` protocol fees
   - `5` creator pot refund
-- `LotteryCanceled(reason, sold, ticketRevenue, potRefund)`
+- `LotteryCanceled(reason, soldSnapshot, ticketRevenue, potRefund)` (**Updated v1.6**)
 - `FundsClaimed(user, amount)`
 - `NativeClaimed(user, amount)`
 - `RefundAllocated(user, amount)`
 - `NativeRefundAllocated(user, amount)`
 - `SurplusSwept(to, amount)`
+- `NativeSurplusSwept(to, amount)` (**New v1.6**)
 - `EntropyProviderUpdated(newProvider)`
 - `EntropyContractUpdated(newContract)`
 - `GovernanceLockUpdated(activeDrawings)`
@@ -242,11 +244,15 @@ See section **10** (Exhaustive Error Map).
 - `winner`, `entropyRequestId`, `drawingRequestedAt`, `selectedProvider`
 - `ticketsOwned(user)`
 - `claimableFunds(user)`, `claimableNative(user)`
+- `soldAtCancel()` (If status is Canceled)
 
 **Derived UI values**
 - `isExpired = now >= deadline`
 - `isSoldOut = maxTickets > 0 && sold >= maxTickets`
 - `isFinalizeEligible = status == Open && (isExpired || isSoldOut) && entropyRequestId == 0`
+- **Progress Bar Logic (Crucial):**
+  - If `status == Canceled`: Display `soldAtCancel` / `max`. (Freezes the UI at the moment of failure).
+  - Else: Display `getSold()` / `max`.
 - Display odds (UX): `ticketsOwned / sold` (if sold > 0)
 
 **Ticket ownership proof visualization (optional)**
@@ -272,7 +278,7 @@ See section **10** (Exhaustive Error Map).
 - Wallet connected
 - Correct chainId
 - USDC balance >= `winningPot`
-- USDC allowance for **deployer** >= `winningPot`
+- **Strict Check:** USDC allowance for **deployer** must be `>= winningPot`. The user must approve the exact amount or more, but the contract will take *exactly* `winningPot`.
 - Validate: `protocolFeePercent <= 20` (read from deployer and display)
 - Validate duration:
   - `>= 600` seconds (10 minutes)
@@ -330,6 +336,9 @@ See section **10** (Exhaustive Error Map).
    - `rescueRegistration(lotteryAddr, creator)`
 3. Registry registrar management (if UI includes registry admin):
    - `setRegistrar(registrar, authorized)`
+4. Surplus Sweeping:
+   - `sweepSurplus(to)` (USDC)
+   - `sweepNativeSurplus(to)` (Native/XTZ)
 
 **Admin preflight checks**
 - Always verify the connected account before enabling an admin action.
@@ -440,6 +449,8 @@ After withdrawal:
 
 ## 5. Events & Indexing (Hybrid Strategy)
 
+
+
 ### 5.1 Must-index Events
 For a complete UX, index the following:
 
@@ -451,7 +462,7 @@ For a complete UX, index the following:
 - `TicketsPurchased(buyer, ...)` → ticket stub history
 - `LotteryFinalized(requestId, ...)` → drawing started
 - `WinnerPicked(winner, ...)` → winner history
-- `LotteryCanceled(reason, ...)` → refunds prompt
+- `LotteryCanceled(reason, soldSnapshot, ...)` → refunds prompt
 - `PrizeAllocated(user, amount, reason)` → claimables list
 
 ### 5.2 RPC fallback
@@ -492,6 +503,7 @@ Map contract enum to deterministic UI states:
 - Canceled (4)
   - show refund flow (claimTicketRefund then withdrawFunds)
   - show creator pot refund if creator
+  - **Freeze sold count:** Display `soldAtCancel` instead of `getSold()`
 
 ---
 
@@ -502,6 +514,7 @@ Map contract enum to deterministic UI states:
 - All owner-only methods require Safe execution:
   - `pause/unpause`
   - `sweepSurplus`
+  - `sweepNativeSurplus`
   - `setEntropyProvider`
   - `setEntropyContract`
 
@@ -612,6 +625,7 @@ Map contract enum to deterministic UI states:
 - `NativeRefundFailed`
 - `ZeroAddress`
 - `NoSurplus`
+- `NoNativeSurplus` (**New v1.6**)
 - `DrawingsActive`
 - `AccountingMismatch`
 
@@ -652,10 +666,12 @@ Map contract enum to deterministic UI states:
 ### Canceled refunds
 - [ ] claimTicketRefund sets claimableFunds
 - [ ] withdrawFunds transfers refund
+- [ ] **UI shows frozen snapshot stats (soldAtCancel)**
 
 ### Admin
 - [ ] Only visible to Safe owner / authorized account
 - [ ] rescueRegistration guarded and validates target
+- [ ] Surplus sweeps (Native + USDC) work
 
 ---
 

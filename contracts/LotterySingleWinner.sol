@@ -13,9 +13,9 @@ interface IEntropyConsumer {
 }
 
 /**
- * @title LotterySingleWinner (Mainnet Candidate v1.5)
+ * @title LotterySingleWinner (Mainnet Candidate v1.6)
  * @notice A single-winner lottery instance using Pyth Entropy.
- * @dev Optimized for Etherlink. Includes Balance Delta checks and State Freezing.
+ * @dev Updated: explicit cancel snapshot + native surplus sweep + stricter funding check.
  */
 contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
@@ -51,11 +51,11 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
     error InvalidMinTickets();
     error MaxLessThanMin();
     error BatchTooCheap();
-    
+
     error NotDeployer();
     error NotFundingPending();
     error FundingMismatch();
-    
+
     error LotteryNotOpen();
     error LotteryExpired();
     error TicketLimitReached();
@@ -73,7 +73,7 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
     error InvalidRequest();
 
     error UnauthorizedCallback();
-    
+
     error NotDrawing();
     error CannotCancel();
     error NotCanceled();
@@ -81,17 +81,25 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
     error EmergencyHatchLocked();
 
     error NothingToClaim();
-    error NothingToRefund(); 
+    error NothingToRefund();
     error NativeRefundFailed();
-    error ZeroAddress(); 
+    error ZeroAddress();
     error NoSurplus();
+    error NoNativeSurplus();
     error DrawingsActive();
     error AccountingMismatch();
-    error UnexpectedTransferAmount(); // Renamed for clarity
+    error UnexpectedTransferAmount();
 
     // Events
     event CallbackRejected(uint64 indexed sequenceNumber, uint8 reasonCode);
-    event TicketsPurchased(address indexed buyer, uint256 count, uint256 totalCost, uint256 totalSold, uint256 rangeIndex, bool isNewRange);
+    event TicketsPurchased(
+        address indexed buyer,
+        uint256 count,
+        uint256 totalCost,
+        uint256 totalSold,
+        uint256 rangeIndex,
+        bool isNewRange
+    );
     event LotteryFinalized(uint64 requestId, uint256 totalSold, address provider);
     event WinnerPicked(address indexed winner, uint256 winningTicketIndex, uint256 totalSold);
     event LotteryCanceled(string reason, uint256 sold, uint256 ticketRevenue, uint256 potRefund);
@@ -107,6 +115,7 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
     event PrizeAllocated(address indexed user, uint256 amount, uint8 indexed reason);
     event FundingConfirmed(address indexed funder, uint256 amount);
     event SurplusSwept(address indexed to, uint256 amount);
+    event NativeSurplusSwept(address indexed to, uint256 amount);
 
     // State
     IERC20 public immutable usdcToken;
@@ -120,20 +129,39 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
 
     uint256 public constant MAX_BATCH_BUY = 1000;
     uint256 public constant MAX_RANGES = 20_000;
-    uint256 public constant MIN_NEW_RANGE_COST = 1_000_000; 
+    uint256 public constant MIN_NEW_RANGE_COST = 1_000_000;
     uint256 public constant MAX_TICKET_PRICE = 100_000 * 1e6;
-    uint256 public constant MAX_POT_SIZE     = 10_000_000 * 1e6;
-    uint64  public constant MAX_DURATION     = 365 days;
+    uint256 public constant MAX_POT_SIZE = 10_000_000 * 1e6;
+    uint64 public constant MAX_DURATION = 365 days;
     uint256 public constant PRIVILEGED_HATCH_DELAY = 1 days;
     uint256 public constant PUBLIC_HATCH_DELAY = 7 days;
-    uint256 public constant HARD_CAP_TICKETS = 10_000_000; 
+    uint256 public constant HARD_CAP_TICKETS = 10_000_000;
 
-    // Accounting: Tracks liabilities (Pot + Revenue) that must not be swept. Decreases on withdrawal.
-    uint256 public totalReservedUSDC; 
+    /**
+     * Accounting (USDC):
+     * - totalReservedUSDC tracks liabilities that must remain in-contract.
+     * - Initially: winningPot (after confirmFunding)
+     * - Each ticket purchase: +totalCost
+     * - Each withdrawal of USDC claimable: -amount
+     */
+    uint256 public totalReservedUSDC;
+
+    /**
+     * Accounting (Native):
+     * - totalClaimableNative is the sum of claimableNative across all users.
+     * - Used to safely sweep accidental native deposits.
+     */
     uint256 public totalClaimableNative;
+
     uint256 public activeDrawings;
 
-    enum Status { FundingPending, Open, Drawing, Completed, Canceled }
+    enum Status {
+        FundingPending,
+        Open,
+        Drawing,
+        Completed,
+        Canceled
+    }
     Status public status;
 
     string public name;
@@ -152,7 +180,11 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
     address public selectedProvider;
     uint64 public drawingRequestedAt;
     uint64 public entropyRequestId;
-    uint256 public soldAtDrawing; 
+    uint256 public soldAtDrawing;
+
+    // Cancel snapshot (explicit, for clarity + indexing safety)
+    uint256 public soldAtCancel;
+    uint64 public canceledAt;
 
     struct TicketRange {
         address buyer;
@@ -173,7 +205,7 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
         if (params.entropyProvider == address(0)) revert InvalidProvider();
         if (params.feeRecipient == address(0)) revert InvalidFeeRecipient();
         if (params.creator == address(0)) revert InvalidCreator();
-        
+
         // Fee Verification: Integer percent (0-20)
         if (params.protocolFeePercent > 20) revert FeeTooHigh();
 
@@ -186,10 +218,8 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
         if (bytes(params.name).length == 0) revert NameEmpty();
         if (params.durationSeconds < 600) revert DurationTooShort();
         if (params.durationSeconds > MAX_DURATION) revert DurationTooLong();
-        if (params.ticketPrice == 0) revert InvalidPrice();
-        if (params.ticketPrice > MAX_TICKET_PRICE) revert InvalidPrice();
-        if (params.winningPot == 0) revert InvalidPot();
-        if (params.winningPot > MAX_POT_SIZE) revert InvalidPot();
+        if (params.ticketPrice == 0 || params.ticketPrice > MAX_TICKET_PRICE) revert InvalidPrice();
+        if (params.winningPot == 0 || params.winningPot > MAX_POT_SIZE) revert InvalidPot();
         if (params.minTickets == 0) revert InvalidMinTickets();
         if (params.minPurchaseAmount > MAX_BATCH_BUY) revert BatchTooLarge();
         if (params.maxTickets != 0 && params.maxTickets < params.minTickets) revert MaxLessThanMin();
@@ -223,47 +253,46 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
         if (status != Status.FundingPending) revert NotFundingPending();
 
         uint256 bal = usdcToken.balanceOf(address(this));
-        if (bal < winningPot) revert FundingMismatch();
 
-        // Assignment for initial funding
+        // Stricter: expect exact pot funding, avoids accidental extra deposits being sweepable.
+        // If you prefer allowing >=, change this back to `bal < winningPot`.
+        if (bal != winningPot) revert FundingMismatch();
+
         totalReservedUSDC = winningPot;
-
         status = Status.Open;
+
         emit FundingConfirmed(msg.sender, winningPot);
     }
 
     function buyTickets(uint256 count) external nonReentrant whenNotPaused {
         if (status != Status.Open) revert LotteryNotOpen();
-        
+
         if (count == 0) revert InvalidCount();
         if (count > MAX_BATCH_BUY) revert BatchTooLarge();
-        
+
         if (block.timestamp >= deadline) revert LotteryExpired();
         if (msg.sender == creator) revert CreatorCannotBuy();
         if (minPurchaseAmount > 0 && count < minPurchaseAmount) revert BatchTooSmall();
 
-        // 1. Validation 
         uint256 currentSold = getSold();
         uint256 newTotal = currentSold + count;
-        
+
         if (newTotal > type(uint96).max) revert Overflow();
-        
-        // Safety: Check Hard Cap
+
         if (newTotal > HARD_CAP_TICKETS) revert TicketLimitReached();
-        // Config: Check Configured Cap
         if (maxTickets > 0 && newTotal > maxTickets) revert TicketLimitReached();
 
         uint256 totalCost = ticketPrice * count;
 
-        bool returning = (ticketRanges.length > 0 && ticketRanges[ticketRanges.length - 1].buyer == msg.sender);
-        
-        // Anti-spam Pre-check
+        bool returning =
+            (ticketRanges.length > 0 && ticketRanges[ticketRanges.length - 1].buyer == msg.sender);
+
         if (!returning) {
             if (ticketRanges.length >= MAX_RANGES) revert TooManyRanges();
             if (totalCost < MIN_NEW_RANGE_COST) revert BatchTooCheap();
         }
 
-        // 2. Effects (State Updates) - CEI Pattern Applied
+        // Effects
         uint256 rangeIndex;
         bool isNewRange;
 
@@ -272,7 +301,7 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
             isNewRange = false;
             ticketRanges[rangeIndex].upperBound = uint96(newTotal);
         } else {
-            ticketRanges.push(TicketRange({ buyer: msg.sender, upperBound: uint96(newTotal) }));
+            ticketRanges.push(TicketRange({buyer: msg.sender, upperBound: uint96(newTotal)}));
             rangeIndex = ticketRanges.length - 1;
             isNewRange = true;
         }
@@ -283,11 +312,11 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
 
         emit TicketsPurchased(msg.sender, count, totalCost, newTotal, rangeIndex, isNewRange);
 
-        // 3. Interactions (External Calls) - With Balance Delta Check
+        // Interactions + balance delta check
         uint256 balBefore = usdcToken.balanceOf(address(this));
         usdcToken.safeTransferFrom(msg.sender, address(this), totalCost);
         uint256 balAfter = usdcToken.balanceOf(address(this));
-        
+
         if (balAfter < balBefore + totalCost) revert UnexpectedTransferAmount();
     }
 
@@ -310,7 +339,7 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
         if (sold == 0) revert NoParticipants();
 
         status = Status.Drawing;
-        soldAtDrawing = sold; // Freeze the total
+        soldAtDrawing = sold;
         drawingRequestedAt = uint64(block.timestamp);
         selectedProvider = entropyProvider;
         activeDrawings += 1;
@@ -335,10 +364,8 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
     }
 
     function entropyCallback(uint64 sequenceNumber, address provider, bytes32 randomNumber) external override {
-        // 1. Spoofing Check
         if (msg.sender != address(entropy)) revert UnauthorizedCallback();
-        
-        // 2. Verified Context Check
+
         if (entropyRequestId == 0 || sequenceNumber != entropyRequestId) {
             emit CallbackRejected(sequenceNumber, 1);
             return;
@@ -348,28 +375,31 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
             return;
         }
 
-        // 3. Resolve
-        _resolve(sequenceNumber, randomNumber);
+        _resolve(randomNumber);
     }
 
-    function _resolve(uint64 /*seq*/, bytes32 rand) internal {
-        uint256 total = soldAtDrawing; // Use frozen total
-        if (total == 0) revert NoParticipants(); 
+    function _resolve(bytes32 rand) internal {
+        uint256 total = soldAtDrawing;
+        if (total == 0) revert NoParticipants();
 
+        // Clear drawing state first
         entropyRequestId = 0;
-        soldAtDrawing = 0; // Clear frozen state
+        soldAtDrawing = 0;
+        drawingRequestedAt = 0;
+        selectedProvider = address(0);
+
         if (activeDrawings > 0) activeDrawings -= 1;
         emit GovernanceLockUpdated(activeDrawings);
 
         uint256 winningIndex = uint256(rand) % total;
         address w = _findWinner(winningIndex);
+
         winner = w;
         status = Status.Completed;
-        selectedProvider = address(0);
 
         uint256 feePot = (winningPot * protocolFeePercent) / 100;
         uint256 feeRev = (ticketRevenue * protocolFeePercent) / 100;
-        
+
         uint256 winnerAmount = winningPot - feePot;
         uint256 creatorNet = ticketRevenue - feeRev;
         uint256 protocolAmount = feePot + feeRev;
@@ -394,6 +424,7 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
     function _findWinner(uint256 winningTicket) internal view returns (address) {
         uint256 low = 0;
         uint256 high = ticketRanges.length - 1;
+
         while (low < high) {
             uint256 mid = low + (high - low) / 2;
             if (ticketRanges[mid].upperBound > winningTicket) {
@@ -407,7 +438,7 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
 
     function forceCancelStuck() external nonReentrant {
         if (status != Status.Drawing) revert NotDrawing();
-        
+
         bool privileged = (msg.sender == owner() || msg.sender == creator);
         if (privileged) {
             if (block.timestamp <= drawingRequestedAt + PRIVILEGED_HATCH_DELAY) revert EarlyCancellationRequest();
@@ -429,30 +460,39 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
     function _cancelAndRefundCreator(string memory reason) internal {
         if (status == Status.Canceled) return;
 
+        // Snapshot sold before any state changes (explicit + indexer friendly)
+        uint256 soldSnapshot = getSold();
+        soldAtCancel = soldSnapshot;
+        canceledAt = uint64(block.timestamp);
+
         bool wasDrawing = (status == Status.Drawing);
+
         status = Status.Canceled;
+
+        // Clean up drawing state (if any)
         selectedProvider = address(0);
         drawingRequestedAt = 0;
         entropyRequestId = 0;
-        soldAtDrawing = 0; // Clean up frozen state
+        soldAtDrawing = 0;
 
         if (wasDrawing && activeDrawings > 0) {
             activeDrawings -= 1;
             emit GovernanceLockUpdated(activeDrawings);
         }
 
+        // Pot refund to creator (once)
         uint256 potRefund = 0;
         if (!creatorPotRefunded && winningPot > 0) {
             creatorPotRefunded = true;
             potRefund = winningPot;
+
+            // Note: totalReservedUSDC already includes winningPot from confirmFunding.
             claimableFunds[creator] += winningPot;
             emit PrizeAllocated(creator, winningPot, 5);
             emit RefundAllocated(creator, winningPot);
         }
 
-        // Updated for efficiency: Snapshot "sold" before emission
-        uint256 sold = getSold();
-        emit LotteryCanceled(reason, sold, ticketRevenue, potRefund);
+        emit LotteryCanceled(reason, soldSnapshot, ticketRevenue, potRefund);
     }
 
     function claimTicketRefund() external nonReentrant {
@@ -462,8 +502,11 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
         if (tix == 0) revert NothingToRefund();
 
         uint256 refund = tix * ticketPrice;
+
+        // Effects
         ticketsOwned[msg.sender] = 0;
 
+        // Note: totalReservedUSDC already includes ticket revenue from purchases.
         claimableFunds[msg.sender] += refund;
         emit PrizeAllocated(msg.sender, refund, 3);
         emit RefundAllocated(msg.sender, refund);
@@ -473,17 +516,20 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
         uint256 amount = claimableFunds[msg.sender];
         if (amount == 0) revert NothingToClaim();
 
+        // Effects
         claimableFunds[msg.sender] = 0;
-        
+
+        // Accounting
         if (totalReservedUSDC < amount) revert AccountingMismatch();
         totalReservedUSDC -= amount;
 
+        // Interaction
         usdcToken.safeTransfer(msg.sender, amount);
         emit FundsClaimed(msg.sender, amount);
     }
 
     function _safeNativeTransfer(address to, uint256 amount) internal {
-        (bool success, ) = payable(to).call{value: amount}("");
+        (bool success,) = payable(to).call{value: amount}("");
         if (!success) {
             claimableNative[to] += amount;
             totalClaimableNative += amount;
@@ -491,16 +537,18 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
         }
     }
 
-    function withdrawNative() external nonReentrant { 
+    function withdrawNative() external nonReentrant {
         uint256 amount = claimableNative[msg.sender];
         if (amount == 0) revert NothingToClaim();
-        
+
         if (totalClaimableNative < amount) revert AccountingMismatch();
-        
+
+        // Effects
         claimableNative[msg.sender] = 0;
         totalClaimableNative -= amount;
 
-        (bool ok, ) = payable(msg.sender).call{value: amount}("");
+        // Interaction
+        (bool ok,) = payable(msg.sender).call{value: amount}("");
         if (!ok) revert NativeRefundFailed();
 
         emit NativeClaimed(msg.sender, amount);
@@ -510,12 +558,28 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
         if (to == address(0)) revert ZeroAddress();
 
         uint256 currentBalance = usdcToken.balanceOf(address(this));
-        
         if (currentBalance <= totalReservedUSDC) revert NoSurplus();
-        
+
         uint256 surplus = currentBalance - totalReservedUSDC;
         usdcToken.safeTransfer(to, surplus);
         emit SurplusSwept(to, surplus);
+    }
+
+    /**
+     * @notice Sweep accidental native deposits while protecting user claimables.
+     * @dev Surplus = address(this).balance - totalClaimableNative
+     */
+    function sweepNativeSurplus(address to) external onlyOwner nonReentrant {
+        if (to == address(0)) revert ZeroAddress();
+
+        uint256 bal = address(this).balance;
+        if (bal <= totalClaimableNative) revert NoNativeSurplus();
+
+        uint256 surplus = bal - totalClaimableNative;
+        (bool ok,) = payable(to).call{value: surplus}("");
+        if (!ok) revert NativeRefundFailed();
+
+        emit NativeSurplusSwept(to, surplus);
     }
 
     function setEntropyProvider(address p) external onlyOwner {
@@ -532,8 +596,13 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
         emit EntropyContractUpdated(e);
     }
 
-    function pause() external onlyOwner { _pause(); }
-    function unpause() external onlyOwner { _unpause(); }
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
 
     function getSold() public view returns (uint256) {
         uint256 len = ticketRanges.length;
