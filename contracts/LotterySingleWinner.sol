@@ -254,9 +254,8 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
 
         uint256 bal = usdcToken.balanceOf(address(this));
 
-        // Stricter: expect exact pot funding, avoids accidental extra deposits being sweepable.
-        // If you prefer allowing >=, change this back to `bal < winningPot`.
-        if (bal != winningPot) revert FundingMismatch();
+        // Accept >= to avoid bricking the lottery if any dust is sent pre-confirmation.
+        if (bal < winningPot) revert FundingMismatch();
 
         totalReservedUSDC = winningPot;
         status = Status.Open;
@@ -538,6 +537,13 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
     }
 
     function withdrawNative() external nonReentrant {
+        withdrawNativeTo(msg.sender);
+    }
+
+    /// @notice Withdraw native claimable to a specified address (helps contract wallets that can't receive native).
+    function withdrawNativeTo(address to) public nonReentrant {
+        if (to == address(0)) revert ZeroAddress();
+
         uint256 amount = claimableNative[msg.sender];
         if (amount == 0) revert NothingToClaim();
 
@@ -548,7 +554,7 @@ contract LotterySingleWinner is Ownable, IEntropyConsumer, ReentrancyGuard, Paus
         totalClaimableNative -= amount;
 
         // Interaction
-        (bool ok,) = payable(msg.sender).call{value: amount}("");
+        (bool ok,) = payable(to).call{value: amount}("");
         if (!ok) revert NativeRefundFailed();
 
         emit NativeClaimed(msg.sender, amount);
