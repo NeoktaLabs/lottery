@@ -36,12 +36,10 @@ export function CreateRaffle({ onBack }: { onBack: () => void }) {
 
   return (
     <div className="min-h-screen pt-24 pb-20 px-4">
-       {/* (UI Code same as before, just update imports if needed) */}
-       {/* For brevity, rendering form here... assume standard form layout */}
        <div className="max-w-6xl mx-auto mb-8 flex items-center gap-4"><button onClick={onBack} className="bg-white/50 hover:bg-white/80 p-2.5 rounded-full backdrop-blur-sm transition-all shadow-sm"><ArrowRight size={20} className="rotate-180 text-gray-700" /></button><span className="text-white font-bold text-lg drop-shadow-md">Back to Park</span></div>
        <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
          <div className="lg:col-span-7"><div className="bg-white/80 backdrop-blur-xl rounded-[2.5rem] p-8 border border-white shadow-xl relative"><form onSubmit={handleSubmit} className="space-y-6"><div><label className="text-xs font-bold text-gray-400 uppercase">Title</label><input type="text" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} className="w-full bg-gray-50 border border-gray-200 text-gray-800 text-lg font-bold rounded-xl px-5 py-4" required /></div><button disabled={isWritePending || isConfirming} className="w-full bg-amber-500 hover:bg-amber-600 text-white font-black py-4 rounded-xl">{step === 'approving' ? 'Approving...' : 'Create Raffle'}</button></form></div></div>
-         <div className="lg:col-span-5 hidden lg:block sticky top-28"><div className="transform scale-110 origin-top"><RaffleCard title={formData.title || "Untitled"} prize={`${formData.prizeAmount || 0} USDC`} ticketPrice={`${formData.ticketPrice || 0} USDC`} sold={0} total={100} endsIn="24h" color={formData.theme as any} creator="You"/></div></div>
+         <div className="lg:col-span-5 hidden lg:block sticky top-28"><div className="transform scale-110 origin-top"><RaffleCard title={formData.title || "Untitled"} prize={`${formData.prizeAmount || 0} USDC`} ticketPrice={`${formData.ticketPrice || 0} USDC`} sold={0} minTickets={Number(formData.minTickets) || 10} maxTickets={Number(formData.maxTickets) || 0} endsIn="24h" color={formData.theme as any} creator="You"/></div></div>
        </div>
     </div>
   );
