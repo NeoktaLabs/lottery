@@ -2,9 +2,8 @@
 
 const getEnv = (key: string): string => {
   const value = import.meta.env[key];
-  // If running in production (not dev), strictly require these to be set
   if (import.meta.env.PROD && !value) {
-    console.error(`CRITICAL: Missing config ${key}`);
+    console.warn(`Config Warning: Missing ${key}`);
     return "";
   }
   return value || "";
@@ -13,10 +12,9 @@ const getEnv = (key: string): string => {
 // 1. Global Constants
 export const CHAIN_ID = Number(getEnv("VITE_CHAIN_ID")) || 42793;
 export const EXPLORER_BASE_URL = getEnv("VITE_EXPLORER_URL") || "https://explorer.etherlink.com";
+export const WALLET_CONNECT_PROJECT_ID = getEnv("VITE_WC_PROJECT_ID") || "YOUR_PROJECT_ID_FALLBACK";
 
 // 2. Contract Addresses
-// We default to empty string if missing so the app doesn't crash immediately on load,
-// but IS_CONFIGURED will be false.
 export const CONTRACT_ADDRESSES = {
   factory: (getEnv("VITE_FACTORY_ADDRESS") || "") as `0x${string}`,
   registry: (getEnv("VITE_REGISTRY_ADDRESS") || "") as `0x${string}`,
@@ -32,7 +30,6 @@ export const OFFICIAL_DEPLOYER_ADDRESS = CONTRACT_ADDRESSES.factory;
 export const getExplorerAddressUrl = (address: string) => `${EXPLORER_BASE_URL}/address/${address}`;
 export const getExplorerTxUrl = (txHash: string) => `${EXPLORER_BASE_URL}/tx/${txHash}`;
 
-// 4. Safety Check
 export const isConfigured = () => {
   return (
     CONTRACT_ADDRESSES.factory.startsWith("0x") &&
