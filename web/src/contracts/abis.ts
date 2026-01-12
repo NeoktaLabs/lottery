@@ -9,34 +9,42 @@ export const ERC20_ABI = [
 
 export const FACTORY_ABI = [
   { name: 'createSingleWinnerLottery', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'name', type: 'string' }, { name: 'ticketPrice', type: 'uint256' }, { name: 'winningPot', type: 'uint256' }, { name: 'minTickets', type: 'uint64' }, { name: 'maxTickets', type: 'uint64' }, { name: 'durationSeconds', type: 'uint64' }, { name: 'minPurchaseAmount', type: 'uint32' }], outputs: [{ name: 'lotteryAddr', type: 'address' }] },
-  { name: 'owner', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'address' }] }
+  { name: 'owner', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'address' }] },
+  { name: 'protocolFeePercent', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] }
+] as const;
+
+export const REGISTRY_ABI = [
+  { name: 'getAllLotteries', type: 'function', stateMutability: 'view', inputs: [{ name: 'start', type: 'uint256' }, { name: 'limit', type: 'uint256' }], outputs: [{ name: '', type: 'address[]' }] },
+  { name: 'getAllLotteriesCount', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'isRegisteredLottery', type: 'function', stateMutability: 'view', inputs: [{ name: 'lottery', type: 'address' }], outputs: [{ name: '', type: 'bool' }] }
 ] as const;
 
 export const LOTTERY_ABI = [
-  { name: 'buyTickets', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'count', type: 'uint256' }], outputs: [] },
-  { name: 'ticketPrice', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  // READS
+  { name: 'name', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'string' }] },
+  { name: 'status', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint8' }] },
   { name: 'winningPot', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'ticketPrice', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
   { name: 'getSold', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
   { name: 'deadline', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint64' }] },
   { name: 'minTickets', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint64' }] },
-  { name: 'name', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'string' }] },
-  { name: 'creator', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'address' }] }
+  { name: 'maxTickets', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint64' }] },
+  { name: 'creator', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'address' }] },
+  { name: 'deployer', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'address' }] },
+  { name: 'winner', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'address' }] },
+  // USER SPECIFIC READS
+  { name: 'ticketsOwned', type: 'function', stateMutability: 'view', inputs: [{ name: 'user', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'claimableFunds', type: 'function', stateMutability: 'view', inputs: [{ name: 'user', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'claimableNative', type: 'function', stateMutability: 'view', inputs: [{ name: 'user', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  // WRITES
+  { name: 'buyTickets', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'count', type: 'uint256' }], outputs: [] },
+  { name: 'finalize', type: 'function', stateMutability: 'payable', inputs: [], outputs: [] },
+  { name: 'withdrawFunds', type: 'function', stateMutability: 'nonpayable', inputs: [], outputs: [] },
+  { name: 'withdrawNative', type: 'function', stateMutability: 'nonpayable', inputs: [], outputs: [] },
+  { name: 'withdrawNativeTo', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }], outputs: [] },
+  { name: 'claimTicketRefund', type: 'function', stateMutability: 'nonpayable', inputs: [], outputs: [] }
 ] as const;
 
-// NEW: REGISTRY ABI
-export const REGISTRY_ABI = [
-  { 
-    name: 'getAllLotteries', 
-    type: 'function', 
-    stateMutability: 'view', 
-    inputs: [{ name: 'start', type: 'uint256' }, { name: 'limit', type: 'uint256' }], 
-    outputs: [{ name: '', type: 'address[]' }] 
-  }
+export const ENTROPY_ABI = [
+    { name: 'getFee', type: 'function', stateMutability: 'view', inputs: [{ name: 'provider', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] }
 ] as const;
-
-// ⚠️ UPDATE THESE WITH YOUR DEPLOYED ADDRESSES
-export const CONTRACT_ADDRESSES = {
-  factory: "0xYOUR_FACTORY_ADDRESS", 
-  registry: "0xYOUR_REGISTRY_ADDRESS", // Add this
-  usdc: "0xYOUR_USDC_ADDRESS" 
-} as const;
