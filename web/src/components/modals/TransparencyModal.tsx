@@ -20,12 +20,7 @@ export function TransparencyModal({ isOpen, onClose, raffleAddress, deployerAddr
         <div className="text-gray-400"><Icon size={16} /></div>
         <span className="text-sm font-bold text-gray-600">{label}</span>
       </div>
-      <a 
-        href={getExplorerAddressUrl(value)}
-        target="_blank" 
-        rel="noopener noreferrer"
-        className="flex items-center gap-1 text-xs font-bold text-blue-500 hover:text-blue-600 hover:underline"
-      >
+      <a href={getExplorerAddressUrl(value)} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs font-bold text-blue-500 hover:text-blue-600 hover:underline">
         {value.slice(0, 6)}...{value.slice(-4)}
         <ExternalLink size={10} />
       </a>
