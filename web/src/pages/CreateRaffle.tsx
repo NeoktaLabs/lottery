@@ -5,6 +5,7 @@ import { ArrowRight, Coins, Clock, Sparkles, AlertCircle, Trophy, Ban, CheckCirc
 import { RaffleCard } from '../components/RaffleCard';
 import { FACTORY_ABI, ERC20_ABI } from '../contracts/abis';
 import { CONTRACT_ADDRESSES } from '../config/contracts';
+import { addToHistory } from '../utils/history';
 
 export function CreateRaffle({ onBack }: { onBack: () => void }) {
   const [step, setStep] = useState<'idle' | 'approving' | 'creating' | 'success'>('idle');
@@ -27,6 +28,9 @@ export function CreateRaffle({ onBack }: { onBack: () => void }) {
 
   const handleCreateRaffle = () => {
     setStep('creating');
+    // Note: We cannot easily get the deployed address here without decoding events, 
+    // so we don't addToHistory instantly on creation in this version.
+    // The user will find it via explore or admin in v1.
     writeContract({ address: CONTRACT_ADDRESSES.factory, abi: FACTORY_ABI, functionName: 'createSingleWinnerLottery', args: [formData.title, parseUnits(formData.ticketPrice, 6), parseUnits(formData.prizeAmount, 6), BigInt(formData.minTickets), formData.maxTickets ? BigInt(formData.maxTickets) : BigInt(0), BigInt(getTotalSeconds()), Number(formData.minPurchaseAmount)] });
   };
 
