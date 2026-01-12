@@ -3,6 +3,8 @@ import {
   createWalletClient,
   http,
   parseAbi,
+  type Hex,
+  type Address,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { defineChain } from "viem";
@@ -17,7 +19,6 @@ export interface Env {
   HOT_SIZE?: string;
   COLD_SIZE?: string;
 
-  // Optional tuning
   MAX_TX?: string;
   TIME_BUDGET_MS?: string;
   ATTEMPT_TTL_SEC?: string;
@@ -46,6 +47,7 @@ const lotteryAbi = parseAbi([
   "function maxTickets() external view returns (uint64)",
   "function entropy() external view returns (address)",
   "function entropyProvider() external view returns (address)",
+  "function entropyRequestId() external view returns (uint64)",
   "function finalize() external payable",
 ]);
 
@@ -64,6 +66,7 @@ function getSafeSize(val: string | undefined, defaultVal: bigint, maxVal: bigint
   if (!val) return defaultVal;
   try {
     const parsed = BigInt(val);
+    if (parsed < 0n) return defaultVal;
     return parsed > maxVal ? maxVal : parsed;
   } catch {
     return defaultVal;
@@ -83,6 +86,31 @@ function nowSec(): bigint {
 
 function lower(a: string): string {
   return a.toLowerCase();
+}
+
+function isTransientErrorMessage(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    m.includes("timeout") ||
+    m.includes("timed out") ||
+    m.includes("fetch") ||
+    m.includes("network") ||
+    m.includes("gateway") ||
+    m.includes("503") ||
+    m.includes("429") ||
+    m.includes("rate") ||
+    m.includes("connection") ||
+    m.includes("econn") ||
+    m.includes("failed to fetch")
+  );
+}
+
+// Prioritization: sold-out first, then expired with sold>0, then expired sold==0
+function priorityScore(isFull: boolean, isExpired: boolean, sold: bigint): number {
+  if (isFull) return 3;
+  if (isExpired && sold > 0n) return 2;
+  if (isExpired && sold === 0n) return 1;
+  return 0;
 }
 
 // --- MAIN WORKER ---
@@ -106,7 +134,7 @@ export default {
     const confirmLock = await env.BOT_STATE.get("lock");
     if (confirmLock !== runId) {
       console.warn(`⚠️ Lock race lost. Exiting.`);
-      return; // don't delete; not ours
+      return;
     }
 
     try {
@@ -125,10 +153,10 @@ export default {
 };
 
 async function runLogic(env: Env, startTimeMs: number) {
-  if (!env.BOT_PRIVATE_KEY || !env.REGISTRY_ADDRESS) throw new Error("Missing Env");
+  if (!env.BOT_PRIVATE_KEY || !env.REGISTRY_ADDRESS) throw new Error("Missing Env: BOT_PRIVATE_KEY/REGISTRY_ADDRESS");
 
   const rpcUrl = env.RPC_URL || "https://node.mainnet.etherlink.com";
-  const account = privateKeyToAccount(env.BOT_PRIVATE_KEY as `0x${string}`);
+  const account = privateKeyToAccount(env.BOT_PRIVATE_KEY as Hex);
 
   const client = createPublicClient({ chain: ETHERLINK, transport: http(rpcUrl) });
   const wallet = createWalletClient({ account, chain: ETHERLINK, transport: http(rpcUrl) });
@@ -139,11 +167,11 @@ async function runLogic(env: Env, startTimeMs: number) {
 
   const MAX_TX = getSafeInt(env.MAX_TX, 5, 25);
   const TIME_BUDGET_MS = getSafeInt(env.TIME_BUDGET_MS, 25_000, 45_000);
-  const ATTEMPT_TTL_SEC = getSafeInt(env.ATTEMPT_TTL_SEC, 600, 3600); // default 10 minutes
+  const ATTEMPT_TTL_SEC = getSafeInt(env.ATTEMPT_TTL_SEC, 600, 3600);
 
   // --- 1) FETCH TOTAL ---
   const total = await client.readContract({
-    address: env.REGISTRY_ADDRESS as `0x${string}`,
+    address: env.REGISTRY_ADDRESS as Address,
     abi: registryAbi,
     functionName: "getAllLotteriesCount",
   });
@@ -172,23 +200,23 @@ async function runLogic(env: Env, startTimeMs: number) {
   const [hotBatch, coldBatch] = await Promise.all([
     safeHotSize > 0n
       ? client.readContract({
-          address: env.REGISTRY_ADDRESS as `0x${string}`,
+          address: env.REGISTRY_ADDRESS as Address,
           abi: registryAbi,
           functionName: "getAllLotteries",
           args: [startHot, safeHotSize],
         })
-      : Promise.resolve([] as `0x${string}`[]),
+      : Promise.resolve([] as Address[]),
     safeColdSize > 0n
       ? client.readContract({
-          address: env.REGISTRY_ADDRESS as `0x${string}`,
+          address: env.REGISTRY_ADDRESS as Address,
           abi: registryAbi,
           functionName: "getAllLotteries",
           args: [startCold, safeColdSize],
         })
-      : Promise.resolve([] as `0x${string}`[]),
+      : Promise.resolve([] as Address[]),
   ]);
 
-  // Compute next cursor, but write it a bit later (after successful processing)
+  // Compute next cursor; commit it at end
   let nextCursor = startCold + safeColdSize;
   if (nextCursor >= total) nextCursor = 0n;
 
@@ -202,7 +230,6 @@ async function runLogic(env: Env, startTimeMs: number) {
 
   // --- 4) STATUS FILTER (Multicall) ---
   const statusResults = await client.multicall({
-    // allowFailure behavior depends on viem version; we also check status field below.
     contracts: candidates.map((addr) => ({
       address: addr,
       abi: lotteryAbi,
@@ -210,10 +237,10 @@ async function runLogic(env: Env, startTimeMs: number) {
     })),
   });
 
-  const openLotteries: `0x${string}`[] = [];
+  const openLotteries: Address[] = [];
   statusResults.forEach((res, i) => {
-    // 1 = Open in your enum: FundingPending=0, Open=1, Drawing=2, Completed=3, Canceled=4
-    if (res.status === "success" && res.result === 1) openLotteries.push(candidates[i]);
+    // Open = 1 (uint8 -> bigint)
+    if (res.status === "success" && res.result === 1n) openLotteries.push(candidates[i]);
   });
 
   if (openLotteries.length === 0) {
@@ -225,13 +252,11 @@ async function runLogic(env: Env, startTimeMs: number) {
   console.log(`⚡ Found ${openLotteries.length} Open lotteries to analyze.`);
 
   // --- 5) PREPARE TX LOOP ---
-  // Use pending nonce to avoid collisions with earlier pending txs
   let currentNonce = await client.getTransactionCount({
     address: account.address,
     blockTag: "pending",
   });
 
-  const feeCache = new Map<string, bigint>();
   const CHUNK_SIZE = 25;
   const chunks = chunkArray(openLotteries, CHUNK_SIZE);
 
@@ -244,7 +269,7 @@ async function runLogic(env: Env, startTimeMs: number) {
 
     const tNow = nowSec();
 
-    // Detail multicall
+    // Detail multicall (7 calls per lottery)
     const detailCalls = chunk.flatMap((addr) => [
       { address: addr, abi: lotteryAbi, functionName: "deadline" },
       { address: addr, abi: lotteryAbi, functionName: "getSold" },
@@ -252,16 +277,28 @@ async function runLogic(env: Env, startTimeMs: number) {
       { address: addr, abi: lotteryAbi, functionName: "paused" },
       { address: addr, abi: lotteryAbi, functionName: "entropy" },
       { address: addr, abi: lotteryAbi, functionName: "entropyProvider" },
+      { address: addr, abi: lotteryAbi, functionName: "entropyRequestId" },
     ]);
 
     const detailResults = await client.multicall({ contracts: detailCalls });
 
-    for (let i = 0; i < chunk.length; i++) {
-      if (txCount >= MAX_TX) break;
-      if (Date.now() - startTimeMs > TIME_BUDGET_MS) break;
+    type Candidate = {
+      addr: Address;
+      deadline: bigint;
+      sold: bigint;
+      maxTickets: bigint;
+      entropyAddr: Address;
+      providerAddr: Address;
+      isExpired: boolean;
+      isFull: boolean;
+      score: number;
+    };
 
+    const actionable: Candidate[] = [];
+
+    for (let i = 0; i < chunk.length; i++) {
       const lottery = chunk[i];
-      const baseIdx = i * 6;
+      const baseIdx = i * 7;
 
       const rDeadline = detailResults[baseIdx];
       const rSold = detailResults[baseIdx + 1];
@@ -269,119 +306,161 @@ async function runLogic(env: Env, startTimeMs: number) {
       const rPaused = detailResults[baseIdx + 3];
       const rEntropy = detailResults[baseIdx + 4];
       const rProvider = detailResults[baseIdx + 5];
+      const rReq = detailResults[baseIdx + 6];
 
-      // ensure all calls succeeded
       if (
         rDeadline.status !== "success" ||
         rSold.status !== "success" ||
         rMax.status !== "success" ||
         rPaused.status !== "success" ||
         rEntropy.status !== "success" ||
-        rProvider.status !== "success"
+        rProvider.status !== "success" ||
+        rReq.status !== "success"
       ) continue;
 
       if (rPaused.result === true) continue;
 
+      const reqId = BigInt(rReq.result as bigint);
+      if (reqId !== 0n) continue; // request pending (shouldn't happen in Open often, but safe)
+
       const deadline = BigInt(rDeadline.result as bigint);
       const sold = BigInt(rSold.result as bigint);
       const maxTickets = BigInt(rMax.result as bigint);
-      const entropyAddr = rEntropy.result as `0x${string}`;
-      const providerAddr = rProvider.result as `0x${string}`;
+      const entropyAddr = rEntropy.result as Address;
+      const providerAddr = rProvider.result as Address;
 
       const isExpired = tNow >= deadline;
       const isFull = maxTickets > 0n && sold >= maxTickets;
 
-      // Only eligible if expired or full
       if (!isExpired && !isFull) continue;
 
-      // Idempotency guard (prevents repeated fee burns)
-      const attemptKey = `attempt:${lower(lottery)}`;
-      const recentAttempt = await env.BOT_STATE.get(attemptKey);
-      if (recentAttempt) {
-        // recently attempted; skip for now
-        continue;
-      }
+      actionable.push({
+        addr: lottery,
+        deadline,
+        sold,
+        maxTickets,
+        entropyAddr,
+        providerAddr,
+        isExpired,
+        isFull,
+        score: priorityScore(isFull, isExpired, sold),
+      });
+    }
 
-      // Mark attempt BEFORE simulate/send (best-effort idempotency)
-      await env.BOT_STATE.put(attemptKey, `${Date.now()}`, { expirationTtl: ATTEMPT_TTL_SEC });
+    if (actionable.length === 0) continue;
+
+    // prioritize
+    actionable.sort((a, b) => b.score - a.score);
+
+    for (const c of actionable) {
+      if (txCount >= MAX_TX) break;
+      if (Date.now() - startTimeMs > TIME_BUDGET_MS) break;
+
+      // Idempotency guard (check only when we're about to act)
+      const attemptKey = `attempt:${lower(c.addr)}`;
+      const recentAttempt = await env.BOT_STATE.get(attemptKey);
+      if (recentAttempt) continue;
 
       console.log(
-        `🚀 Finalizing eligible lottery: ${lottery} (expired=${isExpired} full=${isFull} sold=${sold.toString()} max=${maxTickets.toString()})`
+        `🚀 Finalize candidate: ${c.addr} (expired=${c.isExpired} full=${c.isFull} sold=${c.sold} max=${c.maxTickets})`
       );
 
+      // Fee lookup (KV cache first)
+      const feeKey = `fee:${lower(c.entropyAddr)}:${lower(c.providerAddr)}`;
+      let fee: bigint | null = null;
+
+      const cachedFee = await env.BOT_STATE.get(feeKey);
+      if (cachedFee) {
+        try { fee = BigInt(cachedFee); } catch { fee = null; }
+      }
+
+      if (fee === null) {
+        fee = await client.readContract({
+          address: c.entropyAddr,
+          abi: entropyAbi,
+          functionName: "getFee",
+          args: [c.providerAddr],
+        });
+        // cache for 60s
+        await env.BOT_STATE.put(feeKey, fee.toString(), { expirationTtl: 60 });
+      }
+
+      let value = fee;
+
+      // --- SIMULATE ---
       try {
-        // Fee lookup with cache
-        const cacheKey = `${lower(entropyAddr)}:${lower(providerAddr)}`;
-        let fee = feeCache.get(cacheKey);
-        if (!fee) {
-          fee = await client.readContract({
-            address: entropyAddr,
-            abi: entropyAbi,
-            functionName: "getFee",
-            args: [providerAddr],
-          });
-          feeCache.set(cacheKey, fee);
+        await client.simulateContract({
+          account,
+          address: c.addr,
+          abi: lotteryAbi,
+          functionName: "finalize",
+          value,
+        });
+      } catch (e: any) {
+        const msg = (e?.shortMessage || e?.message || "").toString();
+        if (isTransientErrorMessage(msg)) {
+          console.warn(`   🌧️ Transient sim error (will retry next run): ${msg}`);
+          continue;
         }
 
-        // Send EXACT fee (avoid overpay / claimableNative dust)
-        let value = fee;
-
-        // 1) Simulate
-        let requestObj: any;
-        try {
-          const sim = await client.simulateContract({
-            account,
-            address: lottery,
-            abi: lotteryAbi,
-            functionName: "finalize",
-            value,
-          });
-          requestObj = sim.request;
-        } catch (e: any) {
-          const msg = (e?.shortMessage || e?.message || "").toString();
-
-          // If fee changed, refresh fee and retry once
-          if (msg.includes("InsufficientFee") || msg.toLowerCase().includes("insufficient fee")) {
+        // Fee mismatch -> refresh fee once
+        if (msg.includes("InsufficientFee") || msg.toLowerCase().includes("insufficient fee")) {
+          try {
             const refreshedFee = await client.readContract({
-              address: entropyAddr,
+              address: c.entropyAddr,
               abi: entropyAbi,
               functionName: "getFee",
-              args: [providerAddr],
+              args: [c.providerAddr],
             });
-            feeCache.set(cacheKey, refreshedFee);
             value = refreshedFee;
+            await env.BOT_STATE.put(feeKey, refreshedFee.toString(), { expirationTtl: 60 });
 
-            const sim2 = await client.simulateContract({
+            await client.simulateContract({
               account,
-              address: lottery,
+              address: c.addr,
               abi: lotteryAbi,
               functionName: "finalize",
               value,
             });
-            requestObj = sim2.request;
-          } else {
-            // Not retrying; likely already finalized or not eligible anymore
-            console.warn(`   ⏭️ Simulation failed: ${msg}`);
+          } catch (e2: any) {
+            const msg2 = (e2?.shortMessage || e2?.message || "").toString();
+            console.warn(`   ⏭️ Simulation failed after fee refresh: ${msg2}`);
             continue;
           }
+        } else {
+          // likely NotReadyToFinalize / RequestPending / already finalized etc.
+          console.warn(`   ⏭️ Simulation revert: ${msg}`);
+          // Short cooldown to avoid hammering reverts (not full ATTEMPT_TTL)
+          await env.BOT_STATE.put(attemptKey, `revert:${Date.now()}`, { expirationTtl: Math.min(120, ATTEMPT_TTL_SEC) });
+          continue;
         }
+      }
 
-        // 2) Write with manual nonce
+      // Now mark attempt ONLY after passing simulation (prevents liveness loss on RPC issues)
+      await env.BOT_STATE.put(attemptKey, `${Date.now()}`, { expirationTtl: ATTEMPT_TTL_SEC });
+
+      // --- SEND TX ---
+      try {
         const hash = await wallet.writeContract({
-          ...requestObj,
+          account,
+          address: c.addr,
+          abi: lotteryAbi,
+          functionName: "finalize",
+          value,
           nonce: currentNonce++,
         });
 
         console.log(`   ✅ Tx Sent: ${hash}`);
         txCount++;
       } catch (e: any) {
-        console.warn(`   ⏭️ Tx failed for ${lottery}: ${e?.shortMessage || e?.message || e}`);
-        // Keep attemptKey TTL to avoid hammering; it will expire naturally.
+        const msg = (e?.shortMessage || e?.message || "").toString();
+        console.warn(`   ⏭️ Tx failed: ${msg}`);
+        // keep attempt TTL to prevent fee burn spamming; expires naturally
       }
     }
   }
 
-  // Update cursor after successful processing phase
+  // Update cursor after processing phase
   await env.BOT_STATE.put("cursor", nextCursor.toString());
 
   console.log(`🏁 Run complete. txCount=${txCount} cursor=${nextCursor.toString()}`);
