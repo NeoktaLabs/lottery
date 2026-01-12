@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useReadContract } from 'wagmi';
 import { formatUnits } from 'viem';
 import { Search, Compass, Loader2, AlertCircle } from 'lucide-react';
-// FIX: Correct Import Paths
 import { RaffleCard } from '../components/RaffleCard';
 import { REGISTRY_ABI, LOTTERY_ABI } from '../contracts/abis';
 import { CONTRACT_ADDRESSES } from '../config/contracts';
@@ -40,7 +39,7 @@ const RaffleCardFetcher = ({ address, onNavigate }: { address: string, onNavigat
         ticketPrice={fmtUSDC(price as bigint)}
         sold={Number(sold)}
         minTickets={Number(minTickets)}
-        maxTickets={Number(maxTickets)} // Passing real maxTickets, 0 if infinite
+        maxTickets={Number(maxTickets)}
         endsIn={getEndsInString(deadline as bigint)}
         color="blue"
         creator={`Player ...${(creator as string).slice(-4)}`}
