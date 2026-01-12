@@ -1,32 +1,42 @@
 // src/config/contracts.ts
 
-// 1. Helper to get env vars safely
-const getEnv = (key: string, required: boolean = true): string => {
-  // In Vite, env vars are accessed via import.meta.env
-  // For hardcoded fallbacks during dev, we use || ""
-  return import.meta.env?.[key] || "";
+const getEnv = (key: string): string => {
+  const value = import.meta.env[key];
+  // If running in production (not dev), strictly require these to be set
+  if (import.meta.env.PROD && !value) {
+    console.error(`CRITICAL: Missing config ${key}`);
+    return "";
+  }
+  return value || "";
 };
 
-// 2. Global Constants
-export const CHAIN_ID = 42793; // Etherlink Mainnet
-export const EXPLORER_BASE_URL = "https://explorer.etherlink.com";
+// 1. Global Constants
+export const CHAIN_ID = Number(getEnv("VITE_CHAIN_ID")) || 42793;
+export const EXPLORER_BASE_URL = getEnv("VITE_EXPLORER_URL") || "https://explorer.etherlink.com";
 
-// 3. Contract Addresses (Environment + Defaults)
+// 2. Contract Addresses
+// We default to empty string if missing so the app doesn't crash immediately on load,
+// but IS_CONFIGURED will be false.
 export const CONTRACT_ADDRESSES = {
-  // ⚠️ PASTE YOUR DEPLOYED ADDRESSES HERE
-  factory: "0xYOUR_FACTORY_ADDRESS_HERE" as `0x${string}`,
-  registry: "0xYOUR_REGISTRY_ADDRESS_HERE" as `0x${string}`,
-  usdc: "0x796Ea11Fa2dD751eD01b53C372fFDB4AAa8f00F9" as `0x${string}`, // Official Etherlink USDC
+  factory: (getEnv("VITE_FACTORY_ADDRESS") || "") as `0x${string}`,
+  registry: (getEnv("VITE_REGISTRY_ADDRESS") || "") as `0x${string}`,
+  usdc: (getEnv("VITE_USDC_ADDRESS") || "0x796Ea11Fa2dD751eD01b53C372fFDB4AAa8f00F9") as `0x${string}`,
   
-  // Infrastructure
   entropy: "0x2880aB155794e7179c9eE2e38200202908C17B43" as `0x${string}`,
   entropyProvider: "0x52DeaA1c84233F7bb8C8A45baeDE41091c616506" as `0x${string}`
 } as const;
 
-// 4. Verification
-// If a raffle's deployer matches this, it gets the Gold Checkmark
 export const OFFICIAL_DEPLOYER_ADDRESS = CONTRACT_ADDRESSES.factory;
 
-// 5. Helpers
+// 3. Helpers
 export const getExplorerAddressUrl = (address: string) => `${EXPLORER_BASE_URL}/address/${address}`;
 export const getExplorerTxUrl = (txHash: string) => `${EXPLORER_BASE_URL}/tx/${txHash}`;
+
+// 4. Safety Check
+export const isConfigured = () => {
+  return (
+    CONTRACT_ADDRESSES.factory.startsWith("0x") &&
+    CONTRACT_ADDRESSES.registry.startsWith("0x") &&
+    CONTRACT_ADDRESSES.usdc.startsWith("0x")
+  );
+};
