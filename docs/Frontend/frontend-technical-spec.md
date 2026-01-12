@@ -1,6 +1,6 @@
 # Ppopgi (뽑기) — Frontend Technical Specification (Etherlink Mainnet)
-**Version:** v1.2
-**Audience:** Frontend engineers, blockchain integrators
+**Version:** v1.3 (Updated to match smart contracts v1.6)  
+**Audience:** Frontend engineers, blockchain integrators  
 **Goal:** Ship a smooth, correct, safe dApp UI that maps **1:1** to the deployed contracts on **Etherlink Mainnet**
 
 ---
@@ -11,8 +11,9 @@
    - No simulated winners, fake timers, fake “recent activity”, or synthetic social proof.
    - Countdown timers are allowed, but must be derived from on-chain `deadline`.
 
-2. **Never send a tx that will revert**
+2. **Never send an obviously reverting tx**
    - Preflight checks must prevent obvious reverts (wrong network, insufficient balances, allowance, not eligible state).
+   - **Note:** some reverts are still possible due to **mempool races** (another user finalizes/buys first). Handle gracefully.
 
 3. **Events first, RPC verification always**
    - Use events for live UX.
@@ -31,7 +32,7 @@
 
 ### 1.2 Network Enforcement
 If the user is on the wrong network:
-- Disable: Create / Buy / Finalize / Claim / Refund / Admin actions
+- Disable: Create / Buy / Draw / Collect / Refund / Admin actions
 - Show a single CTA: **“Switch to Etherlink”**
 - Once switched, re-fetch:
   - chainId
@@ -39,12 +40,15 @@ If the user is on the wrong network:
   - balances
   - registry page
 
-### 1.3 Canonical Addresses (from your spec)
+### 1.3 Canonical Addresses
+These are constants in UI config:
+
 - **USDC:** `0x796Ea11Fa2dD751eD01b53C372fFDB4AAa8f00F9`
 - **Pyth Entropy:** `0x2880aB155794e7179c9eE2e38200202908C17B43`
 - **Entropy Provider:** `0x52DeaA1c84233F7bb8C8A45baeDE41091c616506`
 
-> **Note:** These are constants in UI config. The Deployer also stores its own config (`usdc`, `entropy`, `entropyProvider`, `feeRecipient`, `protocolFeePercent`). The UI should display the Deployer-configured addresses as the “current default config”.
+> **Note:** The Deployer also stores its own current defaults (`usdc`, `entropy`, `entropyProvider`, `feeRecipient`, `protocolFeePercent`).  
+> The UI must display Deployer-configured addresses as the “current default config” for *new* raffles.
 
 ### 1.4 Units / Formatting Rules
 - **USDC:** 6 decimals
@@ -66,7 +70,7 @@ Block Create & Buy actions behind a checkbox:
 
 **Storage / Public Reads**
 - `owner() -> address`
-- `allLotteries(uint256) -> address` (public array getter)
+- `allLotteries(uint256) -> address`
 - `typeIdOf(address) -> uint256`
 - `creatorOf(address) -> address`
 - `registeredAt(address) -> uint64`
@@ -84,9 +88,6 @@ Block Create & Buy actions behind a checkbox:
 - `OwnershipTransferred(oldOwner, newOwner)`
 - `RegistrarSet(registrar, authorized)`
 - `LotteryRegistered(index, typeId, lottery, creator)`
-
-**Custom Errors**
-- `NotOwner`, `ZeroAddress`, `NotRegistrar`, `AlreadyRegistered`, `InvalidTypeId`
 
 ---
 
@@ -108,13 +109,10 @@ Block Create & Buy actions behind a checkbox:
 - `transferOwnership(newOwner)` (owner-only)
 
 **Events**
-- `DeployerOwnershipTransferred(oldOwner, newOwner)`
-- `ConfigUpdated(usdc, entropy, provider, feeRecipient, protocolFeePercent)`
-- `LotteryDeployed(lottery, creator, winningPot, ticketPrice, name, usdc, entropy, entropyProvider, feeRecipient, protocolFeePercent, deadline, minTickets, maxTickets)`
+- `LotteryDeployed(...)`
 - `RegistrationFailed(lottery, creator)`
-
-**Custom Errors**
-- `NotOwner`, `ZeroAddress`, `FeeTooHigh`, `NotAuthorizedRegistrar`, `InvalidRescueTarget`
+- `ConfigUpdated(...)`
+- `DeployerOwnershipTransferred(...)`
 
 ---
 
@@ -129,102 +127,73 @@ Block Create & Buy actions behind a checkbox:
 - `PUBLIC_HATCH_DELAY = 7 days`
 
 **Core Reads**
-- `status() -> uint8 enum` where:
+- `status() -> uint8 enum`:
   - `0 FundingPending`
   - `1 Open`
   - `2 Drawing`
   - `3 Completed`
   - `4 Canceled`
-- `name()`
-- `createdAt()`
-- `deadline()`
-- `ticketPrice()`
-- `winningPot()`
-- `ticketRevenue()`
-- `minTickets()`
-- `maxTickets()`
-- `minPurchaseAmount()`
+- `name()`, `createdAt()`, `deadline()`
+- `ticketPrice()`, `winningPot()`, `ticketRevenue()`
+- `minTickets()`, `maxTickets()`, `minPurchaseAmount()`
 - `winner()`
-- `entropyRequestId()`
-- `drawingRequestedAt()`
-- `soldAtDrawing()`
-- `soldAtCancel()` (**New v1.6**: snapshot for canceled UI)
-- `canceledAt()` (**New v1.6**)
+- `entropyRequestId()`, `drawingRequestedAt()`, `soldAtDrawing()`
+- `soldAtCancel()`, `canceledAt()`
 - `entropyProvider()` (current provider)
 - `selectedProvider()` (provider used for current draw)
 - `activeDrawings()`
 - `ticketsOwned(user)`
-- `claimableFunds(user)`
-- `claimableNative(user)`
-- `totalReservedUSDC()`
-- `totalClaimableNative()`
-- `creator()`
-- `feeRecipient()`
-- `protocolFeePercent()`
+- `claimableFunds(user)`, `claimableNative(user)`
+- `totalReservedUSDC()`, `totalClaimableNative()`
+- `creator()`, `feeRecipient()`, `protocolFeePercent()`
 - `deployer()`
+- `entropy()` (contract address)
 
 **View Functions**
 - `getSold() -> uint256`
-- `ticketRanges(uint256) -> (buyer, upperBound)` (public array getter)
+- `ticketRanges(uint256) -> (buyer, upperBound)`
 
 **Writes**
-- `buyTickets(count)` (USDC transferFrom user)
-- `finalize()` payable (pays Entropy fee)
+- `buyTickets(count)`
+- `finalize()` payable
 - `claimTicketRefund()`
 - `withdrawFunds()`
 - `withdrawNative()`
-- `cancel()` (when expired + min not reached)
-- `forceCancelStuck()` (Drawing + after delay)
-- `sweepSurplus(to)` (owner-only, USDC)
-- `sweepNativeSurplus(to)` (owner-only, **New v1.6**, XTZ)
-- `setEntropyProvider(p)` (owner-only, requires no active drawings)
-- `setEntropyContract(e)` (owner-only, requires no active drawings)
-- `pause()` / `unpause()` (owner-only)
-
-**Events**
-- `TicketsPurchased(buyer, count, totalCost, totalSold, rangeIndex, isNewRange)`
-- `LotteryFinalized(requestId, totalSold, provider)`
-- `WinnerPicked(winner, winningTicketIndex, totalSold)`
-- `PrizeAllocated(user, amount, reason)` where reason:
-  - `1` winner payout
-  - `2` creator revenue
-  - `3` participant refund
-  - `4` protocol fees
-  - `5` creator pot refund
-- `LotteryCanceled(reason, soldSnapshot, ticketRevenue, potRefund)` (**Updated v1.6**)
-- `FundsClaimed(user, amount)`
-- `NativeClaimed(user, amount)`
-- `RefundAllocated(user, amount)`
-- `NativeRefundAllocated(user, amount)`
-- `SurplusSwept(to, amount)`
-- `NativeSurplusSwept(to, amount)` (**New v1.6**)
-- `EntropyProviderUpdated(newProvider)`
-- `EntropyContractUpdated(newContract)`
-- `GovernanceLockUpdated(activeDrawings)`
-- `FundingConfirmed(funder, amount)`
-- `EmergencyRecovery()`
-- `CallbackRejected(sequenceNumber, reasonCode)`
-- `ProtocolFeesCollected(amount)`
-
-**Custom Errors**
-See section **10** (Exhaustive Error Map).
+- `withdrawNativeTo(to)` (**Supported in v1.6**; allows withdrawing to a different address)
+- `cancel()`
+- `forceCancelStuck()`
+- Owner-only: `sweepSurplus(to)`, `sweepNativeSurplus(to)`, `setEntropyProvider(p)`, `setEntropyContract(e)`, `pause()`, `unpause()`
 
 ---
 
 ## 3. Pages & Required Features
 
 ### 3.1 Explore (Raffles List)
-**Goal:** Show all verified raffles + indicate active vs closed.
+**Goal:** Show all official raffles + indicate active vs closed.
 
 **Data Sources**
 1. Registry pagination:
    - `getAllLotteriesCount()`
    - `getAllLotteries(start, limit)`
 2. For each address: read raffle contract:
-   - `status()`, `deadline()`, `winningPot()`, `ticketPrice()`, `getSold()`, `maxTickets()`, `name()`
+   - `status()`, `deadline()`, `winningPot()`, `ticketPrice()`, `getSold()`, `maxTickets()`, `minTickets()`, `name()`, `deployer()`
 
-**Verification badge**
-- Verified if `typeIdOf(lottery) > 0` OR `isRegisteredLottery(lottery) == true`.
+#### 3.1.1 Verification & Badges (Updated)
+**Do NOT equate “registered” with “official.”**
+
+Define two badges:
+
+1) **Official Verified**
+- `LotteryRegistry.typeIdOf(lottery) == SINGLE_WINNER_TYPE_ID`
+- AND `LotterySingleWinner(lottery).deployer() == OFFICIAL_DEPLOYER_ADDRESS` (or in an allowlist of official deployers)
+
+2) **Registered**
+- `LotteryRegistry.typeIdOf(lottery) > 0`
+- BUT deployer is not in the allowlist
+
+**Unlisted**
+- Not in registry: do not show on Explore by default
+- Allow “open by address” only via advanced entry (manual paste)
 
 **Active definition**
 - Active raffles: status `Open` or `Drawing`.
@@ -244,20 +213,25 @@ See section **10** (Exhaustive Error Map).
 - `winner`, `entropyRequestId`, `drawingRequestedAt`, `selectedProvider`
 - `ticketsOwned(user)`
 - `claimableFunds(user)`, `claimableNative(user)`
-- `soldAtCancel()` (If status is Canceled)
+- `soldAtCancel()` (if `status == Canceled`)
+- `deployer()` (for badge)
+- `creator()` (to block creator play)
+- `entropy()` and `entropyProvider()` (for fee quoting + display)
 
 **Derived UI values**
 - `isExpired = now >= deadline`
 - `isSoldOut = maxTickets > 0 && sold >= maxTickets`
 - `isFinalizeEligible = status == Open && (isExpired || isSoldOut) && entropyRequestId == 0`
-- **Progress Bar Logic (Crucial):**
-  - If `status == Canceled`: Display `soldAtCancel` / `max`. (Freezes the UI at the moment of failure).
-  - Else: Display `getSold()` / `max`.
-- Display odds (UX): `ticketsOwned / sold` (if sold > 0)
+
+**Progress Bar Logic (Crucial)**
+- If `status == Canceled`: display `soldAtCancel` / max
+- Else: display `getSold()` / max
+
+**Odds (UX)**
+- `ticketsOwned / sold` (if sold > 0)
 
 **Ticket ownership proof visualization (optional)**
-- Read `ticketRanges(i)` progressively (do not load all at once if large).
-- Only needed for advanced “proof view”; do not block core UX.
+- Read `ticketRanges(i)` progressively (never load all by default)
 
 ---
 
@@ -265,88 +239,78 @@ See section **10** (Exhaustive Error Map).
 **Write**
 - `SingleWinnerDeployer.createSingleWinnerLottery(...)`
 
-**Inputs**
-- `name` (string): frontend may prepend emoji and a space.
-- `ticketPrice` (USDC 6 decimals)
-- `winningPot` (USDC 6 decimals)
-- `minTickets` (uint64)
-- `maxTickets` (uint64, 0 = unlimited)
-- `durationSeconds` (uint64)
-- `minPurchaseAmount` (uint32, 0 = none; else enforced)
-
 **Preflight checks (must)**
 - Wallet connected
 - Correct chainId
 - USDC balance >= `winningPot`
-- **Strict Check:** USDC allowance for **deployer** must be `>= winningPot`. The user must approve the exact amount or more, but the contract will take *exactly* `winningPot`.
-- Validate: `protocolFeePercent <= 20` (read from deployer and display)
+- USDC allowance for **deployer** must be `>= winningPot`
+- Validate deployer config:
+  - read `protocolFeePercent()` and display
+  - require `<= 20`
 - Validate duration:
-  - `>= 600` seconds (10 minutes)
+  - `>= 600` seconds
   - `<= 365 days`
-- If `ticketPrice` is very low and creator sets `minPurchaseAmount` too small:
-  - Be aware the contract will revert with `BatchTooCheap` based on:
-    - `requiredMinPrice = ceil(MIN_NEW_RANGE_COST / minEntry)`
-  - Frontend should compute and warn:
-    - `minEntry = (minPurchaseAmount == 0) ? 1 : minPurchaseAmount`
-    - `requiredMinPrice = ceil(1_000_000 / minEntry)` (in USDC base units)
-    - require `ticketPrice >= requiredMinPrice`
-  - Also, for player UX, enforce your “>= $1 per purchase strip” rule.
+- Validate `BatchTooCheap` condition:
+  - `minEntry = (minPurchaseAmount == 0) ? 1 : minPurchaseAmount`
+  - `requiredMinPrice = ceil(1_000_000 / minEntry)` (USDC base units)
+  - require `ticketPrice >= requiredMinPrice`
 
 **Post-success**
-- Get the new `lotteryAddr` from tx logs (`LotteryDeployed`) or return value.
+- Get `lotteryAddr` from tx logs (`LotteryDeployed`) or return value.
 - Deep-link to `/lottery/<addr>`.
 
 **Registry failure handling (mandatory)**
-- If the tx emitted `RegistrationFailed(lottery, creator)`:
-  - Display a strong warning
-  - Show and copy the raffle address
-  - Save it to localStorage as a “Known raffle” so the user can access it later even if not on list.
+If tx emitted `RegistrationFailed(lottery, creator)`:
+- Display a strong warning
+- Show/copy the raffle address
+- Save to localStorage as “Known raffle” (so user can find it later even if not listed)
 
 ---
 
 ### 3.4 Prize Counter (Claims Center)
-**Goal:** Global place to claim funds/refunds across multiple raffles.
+**Goal:** Global place to collect funds/refunds across multiple raffles.
 
 **Indexing strategy**
 - Primary: index `PrizeAllocated(user, amount, reason)` events for the connected wallet.
+- Also index (recommended for accuracy across devices):
+  - `FundsClaimed(user, amount)`
+  - `NativeClaimed(user, amount)`
 - Secondary fallback: localStorage list of interacted raffles (created, purchased, visited).
 
 **For each raffle in claims list**
 - Read `claimableFunds(user)` and `claimableNative(user)` and display both.
 - Enable:
-  - `withdrawFunds()` if claimableFunds > 0
-  - `withdrawNative()` if claimableNative > 0
+  - `withdrawFunds()` if `claimableFunds > 0`
+  - `withdrawNative()` if `claimableNative > 0`
+  - Optional advanced: `withdrawNativeTo(to)` if user wants to collect Energy to a different address
 
 **Collect All**
 - Sequential transactions (one per withdrawal call).
 - Display: “X claims = X signatures”
-- If one tx fails, continue to next only if safe; otherwise stop and show details.
+- If one tx fails due to state changes, stop and prompt refresh.
 
 ---
 
 ### 3.5 Admin (Safe only)
 **Visibility**
-- Only show admin tools if `connectedAccount == safeOwner` OR `connectedAccount == registry.owner()` / deployer owner (depending on page).
+- Only show admin tools if `connectedAccount == safeOwner` OR matches deployer owner / registry owner as appropriate.
 - Otherwise hide (do not just disable).
 
 **Admin actions**
-1. Factory config:
-   - `setConfig(usdc, entropy, provider, feeRecipient, percent)`
-2. Rescue registration:
-   - `rescueRegistration(lotteryAddr, creator)`
-3. Registry registrar management (if UI includes registry admin):
-   - `setRegistrar(registrar, authorized)`
-4. Surplus Sweeping:
-   - `sweepSurplus(to)` (USDC)
-   - `sweepNativeSurplus(to)` (Native/XTZ)
+- Factory config: `setConfig(...)`
+- Rescue registration: `rescueRegistration(...)`
+- Registry registrar management (optional UI): `setRegistrar(...)`
+- Surplus sweeping:
+  - `sweepSurplus(to)` (USDC)
+  - `sweepNativeSurplus(to)` (native/XTZ)
 
 **Admin preflight checks**
-- Always verify the connected account before enabling an admin action.
-- Validate addresses are non-zero.
+- Verify connected account before enabling admin action.
+- Validate non-zero addresses.
 - For rescue registration, pre-read:
-  - `lotteryAddr.code.length > 0` (front-end check)
-  - Read `LotterySingleWinner(lotteryAddr).deployer()` equals deployer address
-  - Read `LotterySingleWinner(lotteryAddr).owner()` equals `safeOwner`
+  - `lotteryAddr.code.length > 0`
+  - `LotterySingleWinner(lotteryAddr).deployer() == OFFICIAL_DEPLOYER_ADDRESS`
+  - `LotterySingleWinner(lotteryAddr).owner() == safeOwner`
 
 ---
 
@@ -355,29 +319,26 @@ See section **10** (Exhaustive Error Map).
 ### 4.1 Wallet Connection
 - Support EVM wallets (e.g., MetaMask).
 - On connect:
-  - Get chainId
-  - Get account
-  - Fetch balances (USDC + native)
-  - Preload registry page 0
+  - chainId
+  - account
+  - balances (USDC + native)
+  - preload registry page 0
 
 ### 4.2 ERC20 Approvals (USDC)
 **Required approvals**
-- Create flow: approve the **deployer** to transfer `winningPot`.
-- Buy flow: approve the **raffle** to transfer `ticketPrice * count`.
+- Create: approve **deployer** for `winningPot`
+- Play: approve **raffle** for `ticketPrice * count`
 
 **UX**
 - Show current allowance
-- Offer:
-  - Approve exact
-  - Approve max
-- Allowance must be re-fetched after approve tx confirmation.
+- Offer approve exact / approve max
+- Re-fetch allowance after approval confirmation
 
-### 4.3 Buy Tickets
+### 4.3 Play (Buy Tickets)
 **Write:** `LotterySingleWinner.buyTickets(count)`
 
 **Preflight must prevent**
-- Wrong chain
-- Not connected
+- Wrong chain / not connected
 - `status != Open`
 - `now >= deadline`
 - `count == 0`
@@ -400,30 +361,30 @@ See section **10** (Exhaustive Error Map).
   - `getSold()`
   - `ticketsOwned(user)`
   - `ticketRevenue()`
-  - `claimableFunds(user)` (optional)
-- Update odds display
 
-### 4.4 Finalize
+### 4.4 Draw (Finalize)
 **Write:** `LotterySingleWinner.finalize()` payable
 
 **Eligibility**
 - `status == Open`
 - `entropyRequestId == 0`
-- AND (expired OR sold out)
+- AND (`isExpired` OR `isSoldOut`)
+
+**Fee quoting (Updated)**
+- Fee must be read from the lottery’s configured entropy & provider:
+  - `fee = Entropy(lottery.entropy()).getFee(lottery.entropyProvider())`
+- Display fee explicitly.
 
 **Preflight**
-- Read fee: `entropy.getFee(entropyProvider)`
-- Ensure user native balance >= fee (plus a buffer for gas)
-- Show fee explicitly in UI
+- Ensure user native balance >= fee + gas buffer
 
 **Send tx**
-- `value = fee` (or fee + small buffer if you want, contract refunds excess)
+- Recommended: `value = fee` (exact)
+- If UI uses `value > fee`, contract refunds excess; refunds may become `claimableNative` if immediate refund fails.
 
 **After tx**
 - Listen for `LotteryFinalized`
-- Update state to Drawing
-- Show “waiting for callback”
-- Poll:
+- Show Drawing state; poll:
   - `status()` until Completed or Canceled
   - `winner()` once Completed
 
@@ -433,41 +394,46 @@ Two-step:
 2. `withdrawFunds()` transfers USDC out
 
 **Eligibility**
-- status must be `Canceled`
-- `ticketsOwned(user) > 0` for claimTicketRefund
-- `claimableFunds(user) > 0` for withdrawFunds
+- status == `Canceled`
+- `ticketsOwned(user) > 0` for `claimTicketRefund`
+- `claimableFunds(user) > 0` for `withdrawFunds`
 
-### 4.6 Withdrawals
+**Creator note (Updated)**
+- Creator pot refund is **allocated automatically on cancel**.
+- Creator only needs `withdrawFunds()` to collect it.
+
+### 4.6 Collect (Withdrawals)
 - `withdrawFunds()` for USDC
 - `withdrawNative()` for native (XTZ)
+- Optional advanced: `withdrawNativeTo(to)`
 
 After withdrawal:
 - Re-read claimables
-- Update “Prize Counter” totals
+- Update claims totals
 
 ---
 
 ## 5. Events & Indexing (Hybrid Strategy)
 
-
-
 ### 5.1 Must-index Events
-For a complete UX, index the following:
-
 **Factory**
-- `LotteryDeployed(...)` → discovery + metadata
-- `RegistrationFailed(lottery, creator)` → hidden raffles + admin alert
+- `LotteryDeployed(...)`
+- `RegistrationFailed(lottery, creator)`
+- `ConfigUpdated(...)` (for showing current defaults)
 
 **Raffle**
-- `TicketsPurchased(buyer, ...)` → ticket stub history
-- `LotteryFinalized(requestId, ...)` → drawing started
-- `WinnerPicked(winner, ...)` → winner history
-- `LotteryCanceled(reason, soldSnapshot, ...)` → refunds prompt
-- `PrizeAllocated(user, amount, reason)` → claimables list
+- `TicketsPurchased(...)`
+- `LotteryFinalized(...)`
+- `WinnerPicked(...)`
+- `LotteryCanceled(...)`
+- `PrizeAllocated(user, amount, reason)`
+- Recommended for multi-device accuracy:
+  - `FundsClaimed(user, amount)`
+  - `NativeClaimed(user, amount)`
 
 ### 5.2 RPC fallback
 If events are missing:
-- Always verify the canonical state by reading:
+- Always verify canonical state:
   - `status()`
   - `winner()`
   - `claimableFunds(user)`
@@ -477,163 +443,70 @@ If events are missing:
 ### 5.3 localStorage fallback
 Maintain a set keyed by `chainId + walletAddress`:
 - raffles created
-- raffles purchased
+- raffles played
 - raffles visited (optional)
-
-Use it to rebuild claims view even if indexing is unavailable.
 
 ---
 
-## 6. Status → UI State Contract (Engineering)
-
-Map contract enum to deterministic UI states:
+## 6. Status → UI State Contract
 
 - FundingPending (0)
-  - disable buy/finalize
-  - show “setup” state
+  - disable play/draw
+  - show “setting up”
 - Open (1)
-  - allow buy
-  - allow finalize only if eligible
+  - allow play
+  - allow draw only if eligible
 - Drawing (2)
-  - disable buy/finalize
-  - show draw state, poll for completion
+  - disable play/draw
+  - show “waiting for draw result” + poll
 - Completed (3)
   - show winner
-  - show claimables and claim buttons
+  - show collect buttons if claimable
 - Canceled (4)
   - show refund flow (claimTicketRefund then withdrawFunds)
-  - show creator pot refund if creator
-  - **Freeze sold count:** Display `soldAtCancel` instead of `getSold()`
+  - **Freeze sold count:** display `soldAtCancel`
 
 ---
 
 ## 7. Admin & Operational Considerations
 
 ### 7.1 Safe as Owner
-- `LotterySingleWinner.owner()` is transferred to `safeOwner` by factory.
-- All owner-only methods require Safe execution:
-  - `pause/unpause`
-  - `sweepSurplus`
-  - `sweepNativeSurplus`
-  - `setEntropyProvider`
-  - `setEntropyContract`
+- Owner-only methods require Safe execution.
 
 ### 7.2 Governance locks
-- `setEntropyProvider` and `setEntropyContract` revert if `activeDrawings != 0` (`DrawingsActive`).
-- UI must:
-  - read `activeDrawings()`
-  - disable these settings while activeDrawings > 0
+- `setEntropyProvider` and `setEntropyContract` revert if `activeDrawings != 0`.
+- UI must read `activeDrawings()` and disable those actions while > 0.
 
 ### 7.3 Emergency hatch
 - `forceCancelStuck()` only works when `status == Drawing`.
 - Delay rules:
   - privileged (owner or creator): after `drawingRequestedAt + 1 day`
   - public: after `drawingRequestedAt + 7 days`
-- UI must:
-  - display time remaining
-  - disable until eligible
+- UI must display time remaining and disable until eligible.
 
 ---
 
 ## 8. Performance Requirements
-
-- Avoid N+1 calls:
-  - Use multicall batching where possible for lists.
-- For large registries:
-  - paginate and lazy load
-- Do not load all `ticketRanges` by default; it can be large.
+- Avoid N+1 calls; use multicall batching for list rendering.
+- Paginate and lazy load for large registries.
+- Do not load all `ticketRanges` by default.
 
 ---
 
 ## 9. Security & UX Safety Requirements
-
-- Always display contract addresses (or explorer links) for transparency.
-- Always show the exact token amounts and decimals.
-- Never show “near miss” numerically; only thematic.
-- Never auto-send transactions; always require explicit click.
+- Always show exact token amounts and decimals.
+- Never auto-send transactions; explicit click required.
+- Handle race-condition failures gracefully: explain “Someone acted first—refresh and try again.”
+- **Transparency without technical clutter:** show addresses/explorer links inside a “Details” modal, not in the main UI.
 
 ---
 
-## 10. Exhaustive Error Map (Contract-Derived)
+## 10. Error Handling (Contract-Derived)
+Map custom errors to friendly copy in `frontend-ux-product-spec.md`.
 
-### 10.1 LotteryRegistry Errors
-- `NotOwner`
-- `ZeroAddress`
-- `NotRegistrar`
-- `AlreadyRegistered`
-- `InvalidTypeId`
-
-### 10.2 SingleWinnerDeployer Errors
-- `NotOwner`
-- `ZeroAddress`
-- `FeeTooHigh`
-- `NotAuthorizedRegistrar`
-- `InvalidRescueTarget`
-
-### 10.3 LotterySingleWinner Errors (Complete)
-**Create/Setup**
-- `InvalidEntropy`
-- `InvalidProvider`
-- `InvalidUSDC`
-- `InvalidFeeRecipient`
-- `InvalidCreator`
-- `FeeTooHigh`
-- `NameEmpty`
-- `DurationTooShort`
-- `DurationTooLong`
-- `InvalidPrice`
-- `InvalidPot`
-- `InvalidMinTickets`
-- `MaxLessThanMin`
-- `BatchTooCheap`
-
-**Funding**
-- `NotDeployer`
-- `NotFundingPending`
-- `FundingMismatch`
-
-**Buy**
-- `LotteryNotOpen`
-- `LotteryExpired`
-- `TicketLimitReached`
-- `CreatorCannotBuy`
-- `InvalidCount`
-- `BatchTooLarge`
-- `BatchTooSmall`
-- `TooManyRanges`
-- `Overflow`
-- `UnexpectedTransferAmount`
-
-**Finalize/Entropy**
-- `RequestPending`
-- `NotReadyToFinalize`
-- `NoParticipants`
-- `InsufficientFee`
-- `InvalidRequest`
-- `UnauthorizedCallback`
-
-**Cancel/Emergency**
-- `NotDrawing`
-- `CannotCancel`
-- `NotCanceled`
-- `EarlyCancellationRequest`
-- `EmergencyHatchLocked`
-
-**Claims/Accounting**
-- `NothingToClaim`
-- `NothingToRefund`
-- `NativeRefundFailed`
-- `ZeroAddress`
-- `NoSurplus`
-- `NoNativeSurplus` (**New v1.6**)
-- `DrawingsActive`
-- `AccountingMismatch`
-
-**Revert strings**
-- `Pausable: paused`
-- Ownable revert string (depends on OZ version): treat as “not owner”
-
-> UI must map these to sticky copy defined in `frontend-ux-product-spec.md`.
+**Important**
+- Treat “Pausable: paused” and Ownable reverts as standard permission/paused UX states.
+- For unexpected errors, show a “Refresh & retry” prompt and link to Details.
 
 ---
 
@@ -647,42 +520,142 @@ Map contract enum to deterministic UI states:
 - [ ] Approve flow works (exact + max)
 - [ ] Deployment emits `LotteryDeployed` and deep-links
 - [ ] If `RegistrationFailed`, address shown + stored
+- [ ] Verification badge correctly checks deployer allowlist
 
-### Buy
+### Play
 - [ ] Preflight prevents known revert cases
 - [ ] TicketsPurchased updates sold + owned
 - [ ] Odds display updates correctly
 
-### Finalize
-- [ ] Fee read and displayed correctly
+### Draw
+- [ ] Fee read uses `Entropy(lottery.entropy()).getFee(lottery.entropyProvider())`
 - [ ] tx sends correct `value`
 - [ ] UI transitions to Drawing, then to Completed via polling+events
+- [ ] Handles race-condition failures with refresh prompt
 
 ### Claims
-- [ ] PrizeAllocated indexing builds claim list
+- [ ] PrizeAllocated indexing builds claims list
+- [ ] FundsClaimed/NativeClaimed indexing improves accuracy across devices
 - [ ] withdrawFunds reduces claimableFunds
-- [ ] withdrawNative works, and handles failure path (NativeRefundAllocated)
+- [ ] withdrawNative works, and handles fallback path (claimableNative)
 
 ### Canceled refunds
 - [ ] claimTicketRefund sets claimableFunds
 - [ ] withdrawFunds transfers refund
-- [ ] **UI shows frozen snapshot stats (soldAtCancel)**
+- [ ] UI shows frozen snapshot stats (soldAtCancel)
+- [ ] Creator pot refund is shown as collectible without extra steps
 
 ### Admin
-- [ ] Only visible to Safe owner / authorized account
+- [ ] Only visible to authorized account
 - [ ] rescueRegistration guarded and validates target
 - [ ] Surplus sweeps (Native + USDC) work
 
 ---
 
 ## 12. Implementation Notes (Recommended)
-
-- Use a robust EVM library (e.g., viem / wagmi) with:
+- Use a robust EVM library (viem / wagmi) with:
   - chain enforcement
   - typed ABIs
   - event watching + fallback polling
 - Use multicall for list rendering.
-- Maintain a consistent “data refresh policy”:
-  - On each confirmed tx, refresh only relevant reads (not full app reload).
+- On each confirmed tx, refresh only relevant reads (not full app reload).
+
+---
+
+---
+
+# Ppopgi (뽑기) — Frontend UX & Product Specification
+**Version:** Final UX Gold (v1.1 + alignment patch)  
+**Audience:** UI/UX designers, frontend developers  
+**Network:** Etherlink (Tezos L2)  
+**Tone:** Friendly, safe, playful, non-technical  
+**Core Rule:** *Never make users feel like they are gambling or dealing with blockchain*
+
+---
+
+## 1. Product Vision
+(unchanged)
+
+---
+
+## 2. Global Design Rules (Non-Negotiable)
+(unchanged)
+
+---
+
+## 3. Sticky Language (Never Use Technical Terms)
+(unchanged)
+
+---
+
+## 4. Global Top Bar (All Pages)
+(unchanged)
+
+---
+
+## 5. Coin Cashier (Critical UX Element) — Updated
+
+### Purpose
+Explain **why two coins are needed**, without mentioning blockchain.
+
+### Cashier Modal Content
+Friendly explanation:
+
+> **Welcome to the Coin Cashier 🏪**  
+> 🎟 **Entry Coins** let you play raffles  
+> ⚡ **Energy Coins** help the park run smoothly  
+>
+> **Sometimes Energy refunds arrive as a Collectible instead of instantly.**  
+> If that happens, you can always **Collect** it from your Pocket.
+
+### Actions
+- “Get Entry Coins (USDC)”
+- “Get Energy Coins (XTZ)”
+- External redirect (e.g. Transak)
+- No forced action
+
+---
+
+## 6. Mandatory Disclaimer (First Visit Only)
+(unchanged)
+
+---
+
+## 7. Live Activity Banner (Global, Always Visible) — Clarification
+
+### Content Rules
+- Real events only for “wins”, “new raffle”, “ended without enough entries”
+- Timestamp on every line
+- Max 3 visible at once
+
+### Session Welcome Message
+- Welcome message is UI-only and not on-chain (allowed)
+- Once per session via `sessionStorage`
+
+---
+
+## 8–17
+All remaining UX sections unchanged, with one important addition:
+
+## 18. Transparency Without Technical Clutter (New)
+
+### Rule
+We must be transparent without showing “blockchain-looking” data on the main UI.
+
+### Pattern
+- Add a small **“Details”** link (🔎) on:
+  - Raffle cards (optional)
+  - Raffle detail page (required)
+  - Create confirmation screen (required)
+
+### Details Modal Contents (plain language)
+- “Game ID” (raffle address)
+- “Rulebook” (verified contract page / explorer)
+- “Entry Coin” (USDC address)
+- “Draw Provider” (Entropy contract + provider)
+- “Factory” (deployer address)
+- “Official Verified” badge explanation (why this raffle is official)
+
+This satisfies transparency while keeping the main UI friendly.
 
 ---
