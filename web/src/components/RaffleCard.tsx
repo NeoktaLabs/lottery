@@ -18,9 +18,10 @@ interface RaffleCardProps {
   rank?: number;
   feePercent?: number;
   feeRecipient?: string;
+  isVerified?: boolean;
 }
 
-export function RaffleCard({ address, deployer, title, prize, ticketPrice, sold, minTickets, maxTickets, endsIn, color, creator, rank, feePercent, feeRecipient }: RaffleCardProps) {
+export function RaffleCard({ address, deployer, title, prize, ticketPrice, sold, minTickets, maxTickets, endsIn, color, creator, rank, feePercent, feeRecipient, isVerified }: RaffleCardProps) {
   const [showDetails, setShowDetails] = useState(false);
   const isOfficial = deployer && deployer.toLowerCase() === OFFICIAL_DEPLOYER_ADDRESS.toLowerCase();
 
@@ -49,7 +50,7 @@ export function RaffleCard({ address, deployer, title, prize, ticketPrice, sold,
              <div className="absolute -bottom-3 -left-3 w-6 h-6 bg-white rounded-full border border-gray-100 z-10"></div>
              <div className="absolute -bottom-3 -right-3 w-6 h-6 bg-white rounded-full border border-gray-100 z-10"></div>
              <div className="flex justify-between items-start mb-2">
-               {isOfficial ? (
+               {isVerified ? (
                  <span className="bg-green-100 px-2 py-0.5 rounded text-[10px] font-bold text-green-700 uppercase tracking-wide flex items-center gap-1 border border-green-200"><CheckCircle2 size={10} className="fill-green-600 text-white" /> Official</span>
                ) : (
                  <span className="bg-black/5 px-2 py-0.5 rounded text-[10px] font-bold text-gray-500 uppercase tracking-wide flex items-center gap-1"><Ticket size={10} /> Raffle</span>
