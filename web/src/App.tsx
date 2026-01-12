@@ -13,7 +13,7 @@ import { Explore } from './pages/Explore';
 import { Profile } from './pages/Profile';
 import { Admin } from './pages/Admin';
 import { ERC20_ABI, FACTORY_ABI, REGISTRY_ABI, LOTTERY_ABI } from './contracts/abis';
-import { CONTRACT_ADDRESSES, CHAIN_ID, WALLET_CONNECT_PROJECT_ID, isConfigured } from './config/contracts';
+import { CONTRACT_ADDRESSES, CHAIN_ID, WALLET_CONNECT_PROJECT_ID, isConfigured, OFFICIAL_DEPLOYER_ADDRESS } from './config/contracts';
 
 import '@rainbow-me/rainbowkit/styles.css';
 
@@ -34,6 +34,7 @@ function CashierModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => voi
 function Navbar({ onOpenCashier, onNavigate }: { onOpenCashier: () => void, onNavigate: (view: any) => void }) {
     const { disconnect } = useDisconnect();
     const { address, isConnected } = useAccount();
+    
     const { data: xtzBalance } = useBalance({ address });
     const { data: usdcBalance } = useReadContract({ address: CONTRACT_ADDRESSES.usdc, abi: ERC20_ABI, functionName: 'balanceOf', args: address ? [address] : undefined, query: { enabled: !!address } });
     const { data: factoryOwner } = useReadContract({ address: CONTRACT_ADDRESSES.factory, abi: FACTORY_ABI, functionName: 'owner' });
@@ -50,7 +51,7 @@ function Navbar({ onOpenCashier, onNavigate }: { onOpenCashier: () => void, onNa
                             <div className="flex items-center gap-6"><div onClick={() => onNavigate('home')} className="flex items-center gap-2 cursor-pointer hover:scale-105 transition-transform"><div className="w-9 h-9 bg-[#FFD700] rounded-full flex items-center justify-center text-white font-bold shadow-inner border-2 border-white"><Ticket size={18} className="text-amber-700" /></div><span className="font-bold text-xl text-amber-800 tracking-tight hidden md:block">Ppopgi</span></div><div className="hidden md:flex items-center gap-2"><button onClick={() => onNavigate('explore')} className="flex items-center gap-1.5 px-4 py-2 rounded-full font-bold text-sm text-gray-600 hover:text-blue-600 hover:bg-blue-50 transition-colors"><Compass size={16} /> Explore</button>{connected && (<button onClick={() => onNavigate('profile')} className="flex items-center gap-1.5 px-4 py-2 rounded-full font-bold text-sm text-gray-600 hover:text-purple-600 hover:bg-purple-50 transition-colors animate-fade-in"><LayoutDashboard size={16} /> Dashboard</button>)}{connected && isOwner && (<button onClick={() => onNavigate('admin')} className="flex items-center gap-1.5 px-4 py-2 rounded-full font-bold text-sm text-gray-600 hover:text-red-600 hover:bg-red-50 transition-colors animate-fade-in"><Shield size={16} /> Admin</button>)}<button onClick={() => connected ? onNavigate('create') : openConnectModal()} className="flex items-center gap-1.5 px-4 py-2 rounded-full font-bold text-sm text-gray-600 hover:text-amber-700 hover:bg-amber-100 transition-colors"><Ticket size={16} /> Create</button></div></div>
                             <div className="flex items-center gap-4">
                                 <div className="flex items-center gap-3 bg-gray-50/80 p-1.5 pr-2 rounded-2xl border border-gray-200/60 shadow-inner">{connected && (<div className="hidden lg:flex flex-col gap-1 pl-1"><div className="w-36 bg-[#E8F5E9] text-green-700 px-2.5 py-1 rounded-md font-bold text-[10px] flex items-center justify-between border border-green-200 shadow-sm tracking-tight"><div className="flex items-center gap-1.5"><Zap size={10} className="fill-green-600" /> <span>Energy</span></div><span>{xtzBalance ? `${parseFloat(xtzBalance.formatted).toFixed(2)} XTZ` : '...'}</span></div><div className="w-36 bg-[#FFF8E1] text-amber-700 px-2.5 py-1 rounded-md font-bold text-[10px] flex items-center justify-between border border-amber-200 shadow-sm tracking-tight"><div className="flex items-center gap-1.5"><Coins size={10} className="fill-amber-500" /> <span>Entry</span></div><span>{formatBalance(usdcBalance, 6, 'USDC')}</span></div></div>)}<button onClick={onOpenCashier} className="bg-amber-500 hover:bg-amber-600 text-white p-2 md:px-4 md:py-2.5 rounded-xl font-bold shadow-sm active:shadow-none active:translate-y-1 transition-all flex items-center gap-2 text-xs md:text-sm h-full"><Store size={18} /><span className="hidden md:inline">Cashier</span></button></div>
-                                {connected ? (<div className="flex items-center gap-2"><button onClick={() => onNavigate('profile')} className="bg-white hover:bg-gray-50 text-gray-800 border-2 border-gray-100 px-4 py-2 rounded-xl font-bold shadow-sm flex items-center gap-2 text-sm transition-colors"><div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>{`Player ...${account.address.slice(-4)}`}</button></div>) : (<button onClick={openConnectModal} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-[0_4px_0_0_#1e3a8a] active:shadow-none active:translate-y-1 transition-all flex items-center gap-2 text-sm"><Wallet size={18} /><span className="hidden md:inline">Join the Park</span><span className="md:hidden">Join</span></button>)}
+                                {connected ? (<div className="flex items-center gap-2"><button onClick={() => onNavigate('profile')} className="bg-white hover:bg-gray-50 text-gray-800 border-2 border-gray-100 px-4 py-2 rounded-xl font-bold shadow-sm flex items-center gap-2 text-sm transition-colors"><div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>{`Player ...${account.address.slice(-4)}`}</button><button onClick={() => disconnect()} className="bg-gray-100 hover:bg-red-50 text-gray-400 hover:text-red-500 p-2.5 rounded-xl transition-colors border border-transparent hover:border-red-100" title="Disconnect Wallet"><LogOut size={18} /></button></div>) : (<button onClick={openConnectModal} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-[0_4px_0_0_#1e3a8a] active:shadow-none active:translate-y-1 transition-all flex items-center gap-2 text-sm"><Wallet size={18} /><span className="hidden md:inline">Join the Park</span><span className="md:hidden">Join</span></button>)}
                             </div>
                         </>
                     );
@@ -68,13 +69,23 @@ const HomeRaffleFetcher = ({ address, onNavigate, color, rank }: { address: stri
   const { data: sold } = useReadContract({ ...contractConfig, functionName: 'getSold' });
   const { data: deadline } = useReadContract({ ...contractConfig, functionName: 'deadline' });
   const { data: minTickets } = useReadContract({ ...contractConfig, functionName: 'minTickets' });
-  const { data: maxTickets } = useReadContract({ ...contractConfig, functionName: 'maxTickets' });
+  const { data: maxTickets } = useReadContract({ ...contractConfig, functionName: 'maxTickets' }); 
   const { data: creator } = useReadContract({ ...contractConfig, functionName: 'creator' });
   const { data: deployer } = useReadContract({ ...contractConfig, functionName: 'deployer' });
   
-  // NEW: Read Fees for transparency
+  // Fee Transparency
   const { data: feeRecipient } = useReadContract({ ...contractConfig, functionName: 'feeRecipient' });
   const { data: feePercent } = useReadContract({ ...contractConfig, functionName: 'protocolFeePercent' });
+
+  // Official Badge Logic
+  const { data: typeId } = useReadContract({
+    address: CONTRACT_ADDRESSES.registry,
+    abi: REGISTRY_ABI,
+    functionName: 'typeIdOf',
+    args: [address as `0x${string}`]
+  });
+
+  const isVerified = deployer && (deployer as string).toLowerCase() === OFFICIAL_DEPLOYER_ADDRESS.toLowerCase() && Number(typeId) === 1;
 
   if (!name || !prize || !price) return <div className="w-64 h-[22rem] bg-white/20 backdrop-blur-sm rounded-[2rem] border border-white/30 animate-pulse flex items-center justify-center"><Loader2 className="animate-spin text-white/50"/></div>;
 
@@ -104,6 +115,7 @@ const HomeRaffleFetcher = ({ address, onNavigate, color, rank }: { address: stri
         rank={rank}
         feeRecipient={feeRecipient as string}
         feePercent={Number(feePercent)}
+        isVerified={!!isVerified}
       />
     </div>
   );
