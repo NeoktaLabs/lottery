@@ -7,7 +7,7 @@ import { Ticket, Store, X, Trophy, Hourglass, Coins, Zap, Wallet, LogOut, AlertT
 
 // --- IMPORTS ---
 import { RaffleCard } from './components/RaffleCard';
-import { DisclaimerModal } from './components/modals/DisclaimerModal'; // FIXED IMPORT
+import { DisclaimerModal } from './components/modals/DisclaimerModal';
 import { RaffleDetails } from './pages/RaffleDetails';
 import { CreateRaffle } from './pages/CreateRaffle';
 import { Explore } from './pages/Explore';
@@ -93,8 +93,19 @@ function Navbar({ onOpenCashier, onNavigate }: { onOpenCashier: () => void, onNa
     const { address, isConnected } = useAccount();
     
     const { data: xtzBalance } = useBalance({ address });
-    const { data: usdcBalance } = useReadContract({ address: CONTRACT_ADDRESSES.usdc, abi: ERC20_ABI, functionName: 'balanceOf', args: address ? [address] : undefined, query: { enabled: !!address } });
-    const { data: factoryOwner } = useReadContract({ address: CONTRACT_ADDRESSES.factory, abi: FACTORY_ABI, functionName: 'owner' });
+    const { data: usdcBalance } = useReadContract({ 
+      address: CONTRACT_ADDRESSES.usdc, 
+      abi: ERC20_ABI, 
+      functionName: 'balanceOf', 
+      args: address ? [address] : undefined, 
+      query: { enabled: !!address } 
+    });
+    
+    const { data: factoryOwner } = useReadContract({ 
+      address: CONTRACT_ADDRESSES.factory, 
+      abi: FACTORY_ABI, 
+      functionName: 'owner' 
+    });
     
     const isOwner = address && factoryOwner && (address.toLowerCase() === (factoryOwner as string).toLowerCase());
     
@@ -148,17 +159,23 @@ function Navbar({ onOpenCashier, onNavigate }: { onOpenCashier: () => void, onNa
     );
 }
 
+// --- SUB-COMPONENT: REAL RAFFLE FETCHER (HOMEPAGE) ---
 const HomeRaffleFetcher = ({ address, onNavigate, color, rank }: { address: string, onNavigate: (id: string) => void, color: any, rank?: number }) => {
   const contractConfig = { address: address as `0x${string}`, abi: LOTTERY_ABI };
+  
   const { data: name } = useReadContract({ ...contractConfig, functionName: 'name' });
   const { data: prize } = useReadContract({ ...contractConfig, functionName: 'winningPot' });
   const { data: price } = useReadContract({ ...contractConfig, functionName: 'ticketPrice' });
   const { data: sold } = useReadContract({ ...contractConfig, functionName: 'getSold' });
   const { data: deadline } = useReadContract({ ...contractConfig, functionName: 'deadline' });
   const { data: minTickets } = useReadContract({ ...contractConfig, functionName: 'minTickets' });
-  const { data: maxTickets } = useReadContract({ ...contractConfig, functionName: 'maxTickets' }); 
+  const { data: maxTickets } = useReadContract({ ...contractConfig, functionName: 'maxTickets' });
   const { data: creator } = useReadContract({ ...contractConfig, functionName: 'creator' });
   const { data: deployer } = useReadContract({ ...contractConfig, functionName: 'deployer' });
+  
+  // Fee Transparency
+  const { data: feeRecipient } = useReadContract({ ...contractConfig, functionName: 'feeRecipient' });
+  const { data: feePercent } = useReadContract({ ...contractConfig, functionName: 'protocolFeePercent' });
 
   if (!name || !prize || !price) return <div className="w-64 h-[22rem] bg-white/20 backdrop-blur-sm rounded-[2rem] border border-white/30 animate-pulse flex items-center justify-center"><Loader2 className="animate-spin text-white/50"/></div>;
 
@@ -186,14 +203,27 @@ const HomeRaffleFetcher = ({ address, onNavigate, color, rank }: { address: stri
         color={color}
         creator={`Player ...${(creator as string).slice(-4)}`}
         rank={rank}
+        feeRecipient={feeRecipient as string}
+        feePercent={Number(feePercent)}
       />
     </div>
   );
 };
 
+// --- HOME PAGE (REAL DATA) ---
 function HomeView({ onNavigate }: { onNavigate: (id: string) => void }) {
-  const { data: lotteryAddresses, isLoading } = useReadContract({ address: CONTRACT_ADDRESSES.registry, abi: REGISTRY_ABI, functionName: 'getAllLotteries', args: [BigInt(0), BigInt(20)] });
-  const getLatest = (count: number) => { if (!lotteryAddresses || lotteryAddresses.length === 0) return []; return [...lotteryAddresses].reverse().slice(0, count); };
+  const { data: lotteryAddresses, isLoading } = useReadContract({ 
+    address: CONTRACT_ADDRESSES.registry, 
+    abi: REGISTRY_ABI, 
+    functionName: 'getAllLotteries', 
+    args: [BigInt(0), BigInt(20)] 
+  });
+  
+  const getLatest = (count: number) => { 
+    if (!lotteryAddresses || lotteryAddresses.length === 0) return []; 
+    return [...lotteryAddresses].reverse().slice(0, count); 
+  };
+  
   const latestRaffles = getLatest(3); 
   const nextRaffles = getLatest(8).slice(3);
 
@@ -209,9 +239,12 @@ function HomeView({ onNavigate }: { onNavigate: (id: string) => void }) {
               {latestRaffles[0] && <div className="w-full max-w-[260px] order-1 md:order-2 md:-mt-12 relative z-20 flex flex-col items-center"><HomeRaffleFetcher address={latestRaffles[0]} onNavigate={onNavigate} color="gold" rank={1} /><div className="hidden md:block w-full h-10 bg-gradient-to-t from-yellow-300/60 via-yellow-200/40 to-transparent rounded-b-3xl mt-[-12px] z-0 shadow-[0_10px_20px_-5px_rgba(234,179,8,0.3)] border-b-4 border-yellow-400/50"></div></div>}
               {latestRaffles[2] && <div className="w-full max-w-[260px] order-3 md:order-3 relative flex flex-col items-center"><HomeRaffleFetcher address={latestRaffles[2]} onNavigate={onNavigate} color="bronze" rank={3} /><div className="hidden md:block w-[90%] h-6 bg-gradient-to-t from-orange-200/50 to-orange-100/30 rounded-b-2xl mt-[-10px] z-0 border-b-2 border-orange-300/50"></div></div>}
             </div>
-          ) : <div className="text-center py-20 text-white/80 font-bold">No raffles live yet. Be the first!</div>}
+          ) : (
+            <div className="text-center py-20 text-white/80 font-bold">No raffles live yet. Be the first!</div>
+          )}
           <div className="hidden md:block absolute bottom-0 left-1/2 -translate-x-1/2 w-3/4 h-24 bg-gradient-to-t from-yellow-100/60 to-transparent rounded-t-[50%] blur-3xl -z-10"></div>
       </div>
+
       {nextRaffles.length > 0 && (
         <div className="w-fit mx-auto bg-white/10 backdrop-blur-sm rounded-3xl p-6 mb-6 border border-white/30 shadow-lg"><SectionHeader icon={Hourglass} title="More Raffles" colorClass="bg-red-400" /><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 justify-items-center">{nextRaffles.map((addr) => (<HomeRaffleFetcher key={addr} address={addr} onNavigate={onNavigate} color="pink" />))}</div></div>
       )}
@@ -219,6 +252,7 @@ function HomeView({ onNavigate }: { onNavigate: (id: string) => void }) {
   );
 }
 
+// --- MAIN APP ROUTER ---
 export default function App() {
   const [isCashierOpen, setCashierOpen] = useState(false);
   const [currentModal, setCurrentModal] = useState<'none' | 'details' | 'create' | 'explore' | 'profile' | 'admin'>('none');
