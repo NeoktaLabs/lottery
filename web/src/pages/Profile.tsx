@@ -1,4 +1,3 @@
-import React from 'react';
 import { User, Wallet, Ticket } from 'lucide-react';
 import { useAccount, useReadContract } from 'wagmi';
 import { formatUnits } from 'viem';
@@ -14,11 +13,8 @@ const HistoryItem = ({ address, onNavigate }: { address: string, onNavigate: (id
   const { data: sold } = useReadContract({ ...config, functionName: 'getSold' });
   const { data: min } = useReadContract({ ...config, functionName: 'minTickets' });
   const { data: max } = useReadContract({ ...config, functionName: 'maxTickets' });
-  
-  // FIX A: Normalize Status
   const { data: statusBig } = useReadContract({ ...config, functionName: 'status' });
   const status = statusBig !== undefined ? Number(statusBig) : undefined;
-
   const { data: deployer } = useReadContract({ ...config, functionName: 'deployer' });
   
   if (!name) return null;
@@ -26,7 +22,7 @@ const HistoryItem = ({ address, onNavigate }: { address: string, onNavigate: (id
   return (
     <div onClick={() => onNavigate(address)} className="cursor-pointer relative">
       <RaffleCard 
-        address={address} // FIX D: Pass address explicitly so Transparency Modal works
+        address={address}
         deployer={deployer as string}
         title={name as string}
         prize={prize ? formatUnits(prize, 6) + ' USDC' : '...'}
@@ -50,10 +46,7 @@ export function Profile({ onNavigate }: { onNavigate: (id: string) => void }) {
   return (
     <div className="min-h-screen pt-24 pb-20 px-4 animate-fade-in-up">
       <div className="max-w-6xl mx-auto">
-        <div className="flex items-center gap-4 mb-8">
-          <div className="w-16 h-16 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full flex items-center justify-center text-white shadow-lg border-4 border-white"><User size={32} /></div>
-          <div><h1 className="text-3xl font-black text-white uppercase tracking-tight drop-shadow-md">Player Dashboard</h1><p className="text-white/80 font-bold text-sm">Your On-Chain History</p></div>
-        </div>
+        <div className="flex items-center gap-4 mb-8"><div className="w-16 h-16 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full flex items-center justify-center text-white shadow-lg border-4 border-white"><User size={32} /></div><div><h1 className="text-3xl font-black text-white uppercase tracking-tight drop-shadow-md">Player Dashboard</h1><p className="text-white/80 font-bold text-sm">Your On-Chain History</p></div></div>
         <div className="bg-white/80 backdrop-blur-xl rounded-[2rem] p-8 border border-white shadow-xl min-h-[400px]">
           <div className="flex items-center gap-2 mb-6 text-gray-500 font-bold uppercase text-xs tracking-wider"><Ticket size={16} /> Recent Interactions</div>
           {history.length > 0 ? (
