@@ -3,7 +3,7 @@ import { WagmiProvider, useDisconnect, useAccount, useBalance, useReadContract }
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RainbowKitProvider, ConnectButton, getDefaultConfig } from '@rainbow-me/rainbowkit';
 import { defineChain, formatUnits } from 'viem';
-import { Ticket, Store, X, Trophy, Hourglass, Coins, Zap, Wallet, LogOut, AlertTriangle, LayoutDashboard, Compass, Shield, Loader2, Sparkles } from 'lucide-react';
+import { Ticket, Store, X, Hourglass, Coins, Zap, Wallet, LogOut, AlertTriangle, LayoutDashboard, Compass, Shield, Loader2, Sparkles } from 'lucide-react';
 
 import { RaffleCard } from './components/RaffleCard';
 import { DisclaimerModal } from './components/modals/DisclaimerModal';
@@ -33,7 +33,7 @@ function CashierModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => voi
 
 function Navbar({ onOpenCashier, onNavigate }: { onOpenCashier: () => void, onNavigate: (view: any) => void }) {
     const { disconnect } = useDisconnect();
-    const { address, isConnected } = useAccount();
+    const { address } = useAccount(); // Removed isConnected
     
     const { data: xtzBalance } = useBalance({ address });
     const { data: usdcBalance } = useReadContract({ address: CONTRACT_ADDRESSES.usdc, abi: ERC20_ABI, functionName: 'balanceOf', args: address ? [address] : undefined, query: { enabled: !!address } });
@@ -44,7 +44,7 @@ function Navbar({ onOpenCashier, onNavigate }: { onOpenCashier: () => void, onNa
     return (
         <nav className="w-full h-20 bg-white/85 backdrop-blur-md border-b border-white/50 fixed top-0 z-50 flex items-center justify-between px-4 md:px-8 shadow-sm">
             <ConnectButton.Custom>
-                {({ account, chain, openAccountModal, openConnectModal, mounted }) => {
+                {({ account, chain, openConnectModal, mounted }) => { // Removed openAccountModal
                     const connected = mounted && account && chain;
                     return (
                         <>
@@ -69,15 +69,13 @@ const HomeRaffleFetcher = ({ address, onNavigate, color, rank }: { address: stri
   const { data: sold } = useReadContract({ ...contractConfig, functionName: 'getSold' });
   const { data: deadline } = useReadContract({ ...contractConfig, functionName: 'deadline' });
   const { data: minTickets } = useReadContract({ ...contractConfig, functionName: 'minTickets' });
-  const { data: maxTickets } = useReadContract({ ...contractConfig, functionName: 'maxTickets' }); 
+  const { data: maxTickets } = useReadContract({ ...contractConfig, functionName: 'maxTickets' });
   const { data: creator } = useReadContract({ ...contractConfig, functionName: 'creator' });
   const { data: deployer } = useReadContract({ ...contractConfig, functionName: 'deployer' });
   
-  // Fee Transparency
   const { data: feeRecipient } = useReadContract({ ...contractConfig, functionName: 'feeRecipient' });
   const { data: feePercent } = useReadContract({ ...contractConfig, functionName: 'protocolFeePercent' });
 
-  // Official Badge Logic
   const { data: typeId } = useReadContract({
     address: CONTRACT_ADDRESSES.registry,
     abi: REGISTRY_ABI,
