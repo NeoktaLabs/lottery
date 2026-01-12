@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { isAddress } from 'viem';
 import { Shield, Settings, AlertTriangle, Save, Lock, Loader2, CheckCircle2 } from 'lucide-react';
@@ -24,7 +24,7 @@ export function Admin({ onBack }: { onBack: () => void }) {
   const [confirmUpdate, setConfirmUpdate] = useState(false);
 
   // --- READ CURRENT CONFIG ---
-  const { data: currentUsdc } = useReadContract({ address: CONTRACT_ADDRESSES.factory, abi: FACTORY_ABI, functionName: 'usdc' });
+  const { data: currentUsdc, isLoading: loadingUsdc } = useReadContract({ address: CONTRACT_ADDRESSES.factory, abi: FACTORY_ABI, functionName: 'usdc' });
   const { data: currentEntropy } = useReadContract({ address: CONTRACT_ADDRESSES.factory, abi: FACTORY_ABI, functionName: 'entropy' });
   const { data: currentProvider } = useReadContract({ address: CONTRACT_ADDRESSES.factory, abi: FACTORY_ABI, functionName: 'entropyProvider' });
   const { data: currentRecipient } = useReadContract({ address: CONTRACT_ADDRESSES.factory, abi: FACTORY_ABI, functionName: 'feeRecipient' });
@@ -57,6 +57,9 @@ export function Admin({ onBack }: { onBack: () => void }) {
       ]
     });
   };
+
+  // Safety check: Don't allow saving if data is still loading
+  const canSave = confirmUpdate && !loadingUsdc && currentUsdc && currentEntropy && currentProvider && isAddress(feeRecipient) && feePercent !== '';
 
   if (!isOwner) return (
     <div className="min-h-screen pt-24 px-4 flex justify-center">
@@ -92,7 +95,11 @@ export function Admin({ onBack }: { onBack: () => void }) {
                  </div>
                  <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl flex gap-3"><AlertTriangle className="text-amber-500 shrink-0" size={20} /><div><h4 className="font-bold text-amber-900 text-sm">Important Note</h4><p className="text-xs text-amber-800/80 mt-1">Updates affect newly created raffles only.</p></div></div>
                  <div className="flex items-center gap-2"><input type="checkbox" id="confirm" checked={confirmUpdate} onChange={(e) => setConfirmUpdate(e.target.checked)} className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" /><label htmlFor="confirm" className="text-sm font-bold text-gray-600 cursor-pointer select-none">I confirm these changes are correct.</label></div>
-                 <button onClick={handleSaveConfig} disabled={!confirmUpdate || isPending || isConfirming} className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold py-3 px-8 rounded-xl flex items-center gap-2 shadow-lg transition-all">{isPending || isConfirming ? <Loader2 className="animate-spin" size={18}/> : <Save size={18} />}{isPending ? 'Check Wallet...' : isConfirming ? 'Updating...' : 'Save Configuration'}</button>
+                 
+                 <button onClick={handleSaveConfig} disabled={!canSave || isPending || isConfirming} className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold py-3 px-8 rounded-xl flex items-center gap-2 shadow-lg transition-all">
+                   {isPending || isConfirming ? <Loader2 className="animate-spin" size={18}/> : <Save size={18} />}
+                   {loadingUsdc ? 'Loading Data...' : isPending ? 'Check Wallet...' : isConfirming ? 'Updating...' : 'Save Configuration'}
+                 </button>
                  {isSuccess && <div className="text-green-600 font-bold flex items-center gap-2"><CheckCircle2 size={18}/> Config Updated!</div>}
                </div>
              )}
