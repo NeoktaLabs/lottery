@@ -1,4 +1,4 @@
-# Design Document: 뽑기 (Ppopgi) — Etherlink Single Winner Lottery
+# Design Document: 뽑기 (Ppopgi) — Etherlink Single Winner Lottery (Updated)
 
 ## Table of Contents
 
@@ -107,6 +107,10 @@ The system is split into three on-chain components:
 - No looping through all lotteries (no gas bombs)
 - Minimal surface area (meant to be stable long-term)
 
+**Additional integrity constraints (Updated)**
+- **Contract-only registration:** registry rejects EOAs by requiring `lottery.code.length > 0`
+- **RPC/indexer safety:** pagination functions cap page size (`MAX_PAGE_SIZE`) to avoid large `eth_call` responses
+
 ---
 
 ### 2) SingleWinnerDeployer (Factory)
@@ -118,8 +122,9 @@ The system is split into three on-chain components:
 - Deploy `LotterySingleWinner`.
 - Fund the lottery with the creator's USDC (requires approval).
 - Transfer lottery ownership to the **Safe** (admin owner).
-- **Try/Catch Registration:** Attempts to register the lottery. If it fails (e.g., gas spikes, paused registry), emits `RegistrationFailed(lottery, creator)` so off-chain indexers know it exists, but leaves it unregistered on-chain until rescued.
+- **Try/Catch Registration:** Attempts to register the lottery. If it fails (e.g., gas spikes, registry misconfiguration), emits `RegistrationFailed(lottery, creator)` so off-chain indexers know it exists, but leaves it unregistered on-chain until rescued.
 - Emit `LotteryDeployed` event with extended metadata (deadline, ticket limits) for indexers.
+- **Registration success signaling (Updated):** emits `RegistrationSucceeded(lottery, creator)` when registry registration succeeds (including in `rescueRegistration`).
 
 **Admin**
 - `owner` is the **Safe**
@@ -146,9 +151,9 @@ The system is split into three on-chain components:
 - **Funds Management:**
   - Allocate winner prize, creator revenue, protocol fees.
   - Pull-based withdrawals: `withdrawFunds()` (USDC), `withdrawNative()` (XTZ).
-  - **Surplus Recovery:**
-    - `sweepSurplus(to)`: Recovers excess USDC above `totalReservedUSDC`.
-    - `sweepNativeSurplus(to)`: Recovers excess Native tokens above `totalClaimableNative`.
+- **Surplus Recovery:**
+  - `sweepSurplus(to)`: Recovers excess USDC above `totalReservedUSDC`.
+  - `sweepNativeSurplus(to)`: Recovers excess Native tokens above `totalClaimableNative`.
 
 **Admin**
 - `owner()` is the **Safe**
@@ -170,8 +175,8 @@ Use these values when deploying `SingleWinnerDeployer` to **Etherlink Mainnet**.
 | **Chain ID** | `42793` | |
 | **Block Time** | ~0.5 seconds | |
 | **Native Token** | XTZ | Used for gas |
-| **USDC Address** | `0x796Ea11Fa2dD751eD01b53C372fFDB4AAa8f00F9` | **Verified:** Canonical Bridged USDC. |
-| **Pyth Entropy** | `0x2880aB155794e7179c9eE2e38200202908C17B43` | Verify on Pyth Docs before deploying. |
+| **USDC Address** | `0x796Ea11Fa2dD751eD01b53C372fFDB4AAa8f00F9` | Canonical Bridged USDC (6 decimals). |
+| **Pyth Entropy** | `0x2880aB155794e7179c9eE2e38200202908C17B43` | Verify on Pyth docs before deploying. |
 | **Pyth Provider** | `0x52DeaA1c84233F7bb8C8A45baeDE41091c616506` | Default Pyth Entropy Provider. |
 
 ---
@@ -183,7 +188,7 @@ Controls:
 - Registry ownership (registrar authorization)
 - Deployer config (global settings for new lotteries)
 - Lottery instance admin knobs (pause / oracle config / surplus sweep)
-- **Cannot** change fee recipient on *active* lotteries.
+- **Cannot** change fee recipient on *active* lotteries (fee recipient is immutable per instance).
 
 ### Fee Recipient (External Wallet)
 - Receives protocol fees via `claimableFunds[feeRecipient]`
@@ -209,19 +214,22 @@ Controls:
 LotterySingleWinner state machine:
 
 - **FundingPending**
-  - Lottery deployed but not yet funded by deployer
+  - Lottery deployed but not yet confirmed funded by deployer
+
 - **Open**
   - Pot funded; ticket purchases enabled
   - finalize allowed only if `deadline` passed OR `maxTickets` reached
+
 - **Drawing**
   - Randomness requested from Pyth
   - **State Frozen:** `soldAtDrawing` takes a snapshot of tickets sold.
   - Awaiting callback
-  - `activeDrawings` increments to 1
-  - Governance Lock enabled (cannot change Entropy config)
+  - `activeactiveDrawings` increments (governance lock)
+
 - **Completed**
   - Winner selected
   - Funds allocated to claimable balances
+
 - **Canceled**
   - Min tickets not reached OR emergency hatch triggered
   - **State Frozen:** `soldAtCancel` and `canceledAt` record the exact state at failure.
@@ -234,23 +242,27 @@ LotterySingleWinner state machine:
 ## Core User Flows
 
 ### Create Lottery (Fault Tolerant)
+
 1. Creator approves `SingleWinnerDeployer` to spend `winningPot`.
 2. Creator calls `SingleWinnerDeployer.createSingleWinnerLottery(...)`.
 3. Deployer packs params -> deploys `LotterySingleWinner`.
 4. Deployer transfers `winningPot` from Creator -> Lottery.
 5. Deployer calls `lottery.confirmFunding()` to activate it.
-   - **Validation:** Checks `usdc.balanceOf(this) == winningPot`. (Strict equality prevents creators from accidentally over-funding and losing the excess).
+   - **Validation (Updated):** Checks `usdc.balanceOf(this) >= winningPot`.
+   - **Rationale:** prevents dust-bricking (anyone sending extra USDC cannot permanently lock the lottery in `FundingPending`).
+   - **Operational guidance:** creators should still fund exactly `winningPot`; any accidental excess is recoverable later via `sweepSurplus`.
 6. Deployer transfers lottery ownership to the Safe.
 7. Deployer attempts to register lottery in Registry.
-   - **Success:** Normal flow.
-   - **Failure:** Emits `RegistrationFailed` event. Lottery is live but not in Registry list. Creator contacts Admin for `rescueRegistration`.
+   - **Success:** `LotteryRegistered` emitted by Registry, and `RegistrationSucceeded` emitted by Deployer.
+   - **Failure:** Emits `RegistrationFailed` event. Lottery is live but not in Registry list. Admin can later call `rescueRegistration`.
 
 ### Buy Tickets (Nuclear CEI)
+
 1. Participant calls `LotterySingleWinner.buyTickets(count)`.
 2. **Validation:** Checks status, deadline, hard caps (`HARD_CAP_TICKETS`).
 3. **Anti-Spam Pre-check:** If purchase triggers a new storage range, verifies `count` and `cost` meet minimums.
 4. **Effects (State Update):**
-   - Append ticket range.
+   - Append/update ticket range.
    - Increment `totalReservedUSDC` and `ticketRevenue`.
    - Emit `TicketsPurchased` event.
 5. **Interaction (Nuclear Check):**
@@ -259,13 +271,16 @@ LotterySingleWinner state machine:
    - Measure `balanceAfter`.
    - **Revert** if `balanceAfter < balanceBefore + cost` (Error: `UnexpectedTransferAmount`).
 
+> Note: The minimum-cost rule is aimed at limiting storage-range spam. Returning buyers extend their last range and do not create new ranges.
+
 ### Finalize Lottery (State Freezing)
+
 1. Anyone calls `finalize()` with `msg.value` covering Pyth fee.
 2. Validations: `deadline` passed OR `maxTickets` reached.
 3. If expired and `sold < minTickets`:
    - Lottery canceled.
    - Creator pot refund allocated.
-   - **Msg.value (randomness fee) is refunded to caller immediately via `_safeNativeTransfer`.**
+   - **Msg.value (randomness fee) is refunded to caller immediately via `_safeNativeTransfer`** (or allocated if refund fails).
 4. Else:
    - **Snapshot:** `soldAtDrawing = getSold()`.
    - Enters Drawing.
@@ -273,6 +288,7 @@ LotterySingleWinner state machine:
    - Refunds overpayment (or allocates to `claimableNative` if refund fails).
 
 ### Entropy Callback (Pick Winner)
+
 1. Pyth calls `entropyCallback(seq, provider, random)`.
 2. Contract verifies:
    - `msg.sender == entropy` (Spoofing check).
@@ -287,6 +303,7 @@ LotterySingleWinner state machine:
 6. Status becomes Completed.
 
 ### Withdraw Funds
+
 Pull-based payout:
 - `withdrawFunds()` transfers USDC owed to caller.
   - **Strict Check:** Reverts if `totalReservedUSDC < amount` (Protects against accounting drift).
@@ -294,6 +311,7 @@ Pull-based payout:
   - **Strict Check:** Reverts if `totalClaimableNative < amount`.
 
 ### Cancellation & Refunds
+
 Paths:
 - `cancel()` if expired and `sold < minTickets`.
 - `forceCancelStuck()` if Drawing but callback never arrives:
@@ -307,6 +325,7 @@ Refunds:
 - **Event:** Emits `LotteryCanceled(reason, soldSnapshot, ticketRevenue, potRefund)` for indexer clarity.
 
 ### Sweep Surplus (Admin)
+
 - **USDC:** Admin calls `sweepSurplus(to)`.
   - Checks `balanceOf(this) > totalReservedUSDC`.
   - Transfers difference to `to`.
@@ -316,10 +335,17 @@ Refunds:
 - **Purpose:** Recover accidental user transfers or dust without touching game funds or user refunds.
 
 ### Rescue Registration (Admin)
-- If `RegistrationFailed` event was observed:
-- Admin calls `SingleWinnerDeployer.rescueRegistration(lotteryAddr, creator)`.
-- Validates target lottery is owned by Safe and deployed by this contract.
-- Manually adds the lottery to the Registry (fixes indexing failures).
+
+If a lottery was deployed but registry registration failed:
+
+1. Locate `RegistrationFailed` event on Deployer contract.
+2. Verify lottery address is valid and owned by Safe.
+3. Safe calls `SingleWinnerDeployer.rescueRegistration(lotteryAddress, creatorAddress)`.
+4. Deployer validates:
+   - target is a contract
+   - target `deployer()` equals this deployer
+   - target `owner()` equals `safeOwner`
+5. Deployer registers the lottery and emits `RegistrationSucceeded`.
 
 ---
 
@@ -342,9 +368,10 @@ Protocol fees should go to an **external wallet** (treasury) and **not sit on th
 - **Dual-Solvency Accounting:** Just as `totalReservedUSDC` tracks ERC20 liabilities, `totalClaimableNative` tracks native token liabilities (gas refunds). This allows the admin to safely sweep accidental native deposits (`sweepNativeSurplus`) without endangering user funds.
 - **Nuclear CEI:** `buyTickets` updates state before transfer, AND explicitly checks the token balance delta to prevent "Ghost Ticket" attacks (where a token might return success but transfer nothing).
 - **Hard Caps:** `HARD_CAP_TICKETS` (10M) prevents storage griefing attacks that could make binary search too expensive.
-- **State Freezing:** `soldAtDrawing` (and `soldAtCancel`) locks the participant count during the async randomness request or cancellation, preventing any potential logic drift during state transitions.
-- **Fault Tolerance:** The Deployer `try/catch` block ensures that a Registry failure does not cause the Lottery deployment (and funding) to revert, preventing "stuck funds" scenarios during creation.
-- **Replay Protection:** Uses **Context Verification**. The callback validates `sequenceNumber == entropyRequestId` and `provider == selectedProvider`. `entropyRequestId` is zeroed on success.
+- **State Freezing:** `soldAtDrawing` (and `soldAtCancel`) locks the participant count during the async randomness request or cancellation, preventing logic drift during state transitions.
+- **Fault Tolerance:** Deployer `try/catch` ensures registry failure does not revert deployment, preventing "stuck funds" scenarios during creation.
+- **Replay Protection:** Callback validates `sequenceNumber == entropyRequestId` and `provider == selectedProvider`; request id is cleared on success.
+- **Funding Anti-Brick (Updated):** `confirmFunding()` requires `balance >= winningPot` rather than strict equality to prevent third-party dusting from bricking funding.
 
 ---
 
@@ -353,7 +380,8 @@ Protocol fees should go to an **external wallet** (treasury) and **not sit on th
 - Tickets stored as **cumulative ranges** rather than per-ticket arrays.
 - Winner lookup is **binary search**: `O(log n)`.
 - **Optimization:** Deadline is calculated locally in the Deployer to save an external call during deployment.
-- **Balance Checks:** `buyTickets` performs 2 extra `STATICCALL`s (`balanceOf`) for security. On Etherlink (L2), this gas cost is negligible compared to the security benefit.
+- **Balance Checks:** `buyTickets` performs 2 extra `STATICCALL`s (`balanceOf`) for security. On Etherlink (L2), this cost is negligible vs the security benefit.
+- **Registry pagination cap (Updated):** Registry getters cap `limit` to `MAX_PAGE_SIZE` to keep RPC calls reliable.
 
 ---
 
@@ -373,19 +401,21 @@ Protocol fees should go to an **external wallet** (treasury) and **not sit on th
 
 ### Recovering Accidental Transfers
 1. Check `totalReservedUSDC` vs `usdc.balanceOf(lottery)`.
-2. Safe calls `sweepSurplus(destinationAddress)`.
+2. Safe calls `sweepSurplus(destinationAddress)` if `balance > reserved`.
 3. Excess funds are transferred to the destination.
-4. (Repeat for Native/XTZ using `sweepNativeSurplus`).
+4. Repeat for Native/XTZ using `sweepNativeSurplus`.
 
 ### Rescuing Failed Registration
 If a lottery was deployed but the Registry transaction failed:
 1. Locate `RegistrationFailed` event on Deployer contract.
 2. Verify lottery address is valid and owned by Safe.
 3. Safe calls `SingleWinnerDeployer.rescueRegistration(lotteryAddress, creatorAddress)`.
+4. Confirm `RegistrationSucceeded` is emitted, and Registry shows the lottery.
 
 ### Emergency Cancellation
-**Symptom:** Pyth network is down; callback never arrives.
+**Symptom:** Pyth network is down; callback never arrives.  
 **Action:**
-1. Wait 24 hours (`PRIVILEGED_HATCH_DELAY`).
+1. Wait 24 hours (`PRIVILEGED_HATCH_DELAY`) for owner/creator path.
 2. Admin or Creator calls `forceCancelStuck()`.
 3. Lottery cancels; funds become refundable.
+4. If needed, anyone can call after 7 days (`PUBLIC_HATCH_DELAY`).
