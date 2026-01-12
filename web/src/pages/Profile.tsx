@@ -14,7 +14,11 @@ const HistoryItem = ({ address, onNavigate }: { address: string, onNavigate: (id
   const { data: sold } = useReadContract({ ...config, functionName: 'getSold' });
   const { data: min } = useReadContract({ ...config, functionName: 'minTickets' });
   const { data: max } = useReadContract({ ...config, functionName: 'maxTickets' });
-  const { data: status } = useReadContract({ ...config, functionName: 'status' });
+  
+  // FIX A: Normalize Status
+  const { data: statusBig } = useReadContract({ ...config, functionName: 'status' });
+  const status = statusBig !== undefined ? Number(statusBig) : undefined;
+
   const { data: deployer } = useReadContract({ ...config, functionName: 'deployer' });
   
   if (!name) return null;
@@ -22,6 +26,7 @@ const HistoryItem = ({ address, onNavigate }: { address: string, onNavigate: (id
   return (
     <div onClick={() => onNavigate(address)} className="cursor-pointer relative">
       <RaffleCard 
+        address={address} // FIX D: Pass address explicitly so Transparency Modal works
         deployer={deployer as string}
         title={name as string}
         prize={prize ? formatUnits(prize, 6) + ' USDC' : '...'}
