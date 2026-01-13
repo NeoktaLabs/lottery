@@ -245,4 +245,4 @@ The frontend is designed to be:
 - honest
 
 If the UI disappears tomorrow,  
-**the raffles still work.**
+**the raffles still work.** 
