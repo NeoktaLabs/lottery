@@ -1,172 +1,198 @@
-# Security & Trust Model
+# Ppopgi (뽑기) — Security & Trust Model
 
-This document explains how security, trust, and permissions are handled in **Ppopgi (뽑기)**, in clear and simple terms.
+This document explains how **security, trust, and permissions** are handled in Ppopgi (뽑기).
 
 The goal of this project is **trust through design**, not trust through promises.  
-Everything important is enforced by smart contracts and visible on-chain.
+All important guarantees are enforced by smart contracts and are verifiable on-chain.
+
+This document is intentionally explicit about:
+- what the system guarantees
+- what it does not guarantee
+- where trust assumptions still exist
 
 ---
 
 ## Core principle
 
-> **No single person — including the admin — can drain funds, change outcomes, or interfere with raffles once they are live.**
+> **No single person — including the admin — can drain funds, change outcomes, or interfere with a raffle once it is live.**
 
-User funds are protected by strict on-chain rules, not by goodwill or off-chain control.
+User funds are protected by:
+- immutable contract parameters
+- strict state transitions
+- permissionless actions
+- pull-based withdrawals
 
----
-
-## Funds custody & safety
-
-- User funds are **never held by the admin**
-- Funds are held **directly by the raffle smart contracts**
-- The admin **cannot withdraw, redirect, or seize user funds**
-- There is **no “withdraw all”**, **no backdoor**, and **no emergency drain**
-
-All money flows (winnings, refunds, protocol fees) follow **deterministic contract logic** and are:
-
-- allocated automatically
-- withdrawn only by the rightful recipient
-- fully verifiable on-chain
-
-If you can collect funds, it is because the contract explicitly allows *you* to do so — not because someone approved it.
+Not by operator goodwill.
 
 ---
 
-## What the admin / owner cannot do
+## Threat model (high-level)
 
-Once a raffle is created and opened, the admin **cannot**:
+Ppopgi assumes:
+- adversarial users
+- potentially unreliable infrastructure
+- honest-but-fallible operators
+- public, adversarial mempools
 
-- ❌ change the winner
-- ❌ influence randomness
-- ❌ change ticket prices
+Ppopgi does **not** assume:
+- trusted frontends
+- trusted bots
+- trusted admins
+- private execution environments
+
+---
+
+## What the admin / owner can do
+
+The admin (an Etherlink Safe) can:
+
+- deploy new raffle contracts
+- configure defaults for **future** raffles
+- pause or update off-chain services (frontend, bot)
+- recover tokens accidentally sent to the **deployer contract**
+- upgrade operational processes off-chain
+
+The admin **cannot**:
+- modify live raffles
+- interfere with ticket sales
+- change prices, deadlines, or caps
+- influence randomness
+- select or block winners
+- withdraw user funds
+
+---
+
+## What the admin / owner cannot do (once a raffle is live)
+
+Once a raffle has opened, the admin cannot:
+
 - ❌ change the prize amount
-- ❌ change protocol fees
-- ❌ block withdrawals
-- ❌ confiscate tickets
-- ❌ move user funds
+- ❌ change ticket price
+- ❌ change min/max ticket counts
+- ❌ extend or shorten deadlines
 - ❌ cancel a valid raffle arbitrarily
+- ❌ change protocol fees
+- ❌ confiscate tickets
+- ❌ block refunds
+- ❌ move USDC out of the contract
 
-The outcome of a raffle is determined by:
-- ticket ownership
-- immutable on-chain rules
-- verifiable randomness (Entropy)
-
-Not by the admin.
-
----
-
-## What the admin can do (and why)
-
-The admin role exists for **maintenance and safety**, not control.
-
-The admin **can**:
-
-- ✔️ configure defaults for **future raffles** (fees, providers)
-- ✔️ pause a raffle **only in exceptional situations** (e.g. safety concerns)
-- ✔️ recover **surplus funds** that are not owed to anyone
-- ✔️ assist with rare edge cases (e.g. registry rescue if indexing fails)
-
-Important clarifications:
-
-- Admin actions **do not give access to user funds**
-- Admin actions **do not affect completed payouts**
-- Admin actions are **fully transparent and on-chain**
+All of these properties are enforced by code.
 
 ---
 
-## Emergency mechanisms (user-protective by design)
+## Randomness model
 
-Some safety mechanisms exist to protect users if something goes wrong (for example, if a randomness provider stops responding).
+Ppopgi uses an external on-chain randomness provider (**Entropy**) to select winners.
 
-These mechanisms are:
+### How randomness works
+- When `finalize()` is called, the raffle requests randomness from Entropy.
+- Entropy later calls back with a random value.
+- The contract deterministically derives a winning ticket index.
+- The ticket ranges map that index to a winning address.
 
-- **time-locked**
-- often **permissionless** (anyone can trigger them)
-- designed to result in **refunds**, not fund seizures
+### Trust assumptions
+- The unpredictability of outcomes depends on the Entropy provider.
+- The provider is assumed to be economically and cryptographically secure.
+- The admin cannot influence or replace the randomness provider for an existing raffle.
 
-They exist to **unstick** a raffle — not to give control to a privileged actor.
+### What randomness does NOT protect against
+- Delayed fulfillment by the provider
+- Temporary unavailability of the provider
+- Network congestion delaying callbacks
 
----
-
-## Protocol fees & transparency
-
-Because the project is self-funded, a protocol fee exists to cover running costs.
-
-Key points:
-
-- fees are defined **on-chain**
-- fees are **fixed per raffle** once created
-- fees **cannot be changed mid-raffle**
-- the fee recipient is visible on-chain
-- the frontend displays fee details in the raffle information
-
-There are **no hidden fees**, no off-chain deductions, and no discretionary changes.
+These scenarios delay settlement but do **not** allow fund theft or outcome manipulation.
 
 ---
 
-## Ownership & governance model
+## Finalization & entropy fees
 
-The protocol uses an **owner address (Safe multisig)** for administrative actions.
+### Who can finalize
+- **Anyone** can call `finalize()`
+- No special permissions are required
+- Bots are purely a convenience
 
-Current state:
-- the Safe contains **a single address** (the project creator)
+### Why `finalize()` is payable
+- Randomness requires paying an Entropy fee in native token.
+- The caller must send enough native token to cover this fee.
 
-This is **not ideal long-term**, and it is intentionally disclosed.
-
-However:
-- the owner’s powers are **strictly limited**
-- the owner **cannot touch user funds**
-- the owner **cannot alter raffle outcomes**
-
-If the project grows, the intention is to:
-- add additional entities to the Safe
-- progressively decentralize governance
-- remain aligned with Tezos’ values of transparency and decentralization
+### Fee handling guarantees
+- Overpayment is refunded automatically.
+- If an automatic refund fails, the amount becomes withdrawable.
+- If the raffle cancels due to insufficient ticket sales, any entropy fee sent is returned.
 
 ---
 
-## AI-generated code disclosure
+## Cancellation & refunds
 
-All parts of the system — smart contracts, frontend, and automation — were:
+A raffle is cancelled if:
+- it reaches its expiry
+- and the minimum number of tickets was not sold
 
-- designed
-- written
-- tested
-- and deployed
+In this case:
+- all ticket purchases become refundable
+- no winner is selected
+- the prize pot remains untouched
+- refunds are claimable on-chain by users
 
-with the help of **AI agents**, under human supervision.
-
-While best practices, testing, and documentation were applied, this means:
-
-- the system is **experimental**
-- it may contain bugs or edge cases
-- it is **not formally audited**
-
-Please interact with the protocol thoughtfully and only with amounts you are comfortable with.
+Cancellation is deterministic and cannot be blocked by the admin.
 
 ---
 
-## Security mindset
+## Withdrawal & claim safety
 
-Despite being an experimental project:
+All payouts use a **pull-based** model:
+- users must explicitly claim their funds
+- the contract never pushes funds automatically
 
-- security was a first-class concern
-- contract responsibilities were intentionally separated
-- admin powers were minimized by design
-- accounting models were chosen to prevent fund misuse
-- every important action is verifiable on-chain
+This prevents:
+- reentrancy risks
+- forced transfers
+- dependency on recipient behavior
 
-No system is perfect — but this one aims to be **honest, understandable, and verifiable**.
+Claims are:
+- idempotent
+- non-custodial
+- fully enforced on-chain
+
+---
+
+## Frontend & bot trust assumptions
+
+The frontend:
+- cannot custody funds
+- cannot change outcomes
+- cannot block claims
+
+The finalizer bot:
+- has no special permissions
+- can be replaced by anyone
+- does not introduce trust assumptions
+
+If both disappear, the system still functions.
+
+---
+
+## Known limitations & non-goals
+
+Ppopgi does **not** attempt to:
+- hide that raffles are games of chance
+- guarantee profit or fairness beyond randomness
+- eliminate all external dependencies
+- optimize for maximal throughput or revenue
+
+Instead, it prioritizes:
+- clarity
+- auditability
+- constrained behavior
+- user safety
 
 ---
 
 ## Final note
 
-Ppopgi does not ask for blind trust.
+Ppopgi’s security model is intentionally conservative.
 
-If you want to verify any claim made here:
-- the code is public
-- the contracts are readable
-- the rules are enforced on-chain
+It does not promise perfection —  
+it promises **honest rules, visible risks, and enforceable guarantees**.
 
-You don’t need to trust the admin — you can check.
+Everything else is left to user choice.
