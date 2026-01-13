@@ -1,44 +1,58 @@
-# Architecture
+# Ppopgi (뽑기) — Architecture
 
-## On-chain contracts
+This document describes **how all parts of Ppopgi fit together**, both on-chain and off-chain.
 
-### 1) LotteryRegistry (forever)
-Purpose:
-- A permanent, minimal registry holding a list of deployed raffle contracts.
+The architecture is intentionally:
+- simple
+- modular
+- verifiable
+- resistant to central points of failure
 
-Key properties:
-- registrar-gated registration (authorized deployers only)
-- pagination helpers (bounded loops)
-- no gameplay logic
+---
 
-### 2) SingleWinnerDeployer (factory)
-Purpose:
-- Deploys `LotterySingleWinner` instances using a shared config.
-- Registers the new raffle in the registry (best effort).
+## High-level architecture
 
-Key properties:
-- must be authorized as a registrar in the registry
-- deploys raffle instance, funds initial prize, confirms funding, transfers ownership to Safe
-- wraps registry registration in `try/catch` and emits `RegistrationFailed` if needed
+```mermaid
+flowchart LR
+  subgraph Users
+    U[Players / Creators]
+    S[Safe Admin]
+  end
 
-### 3) LotterySingleWinner (raffle instance)
-Purpose:
-- Runs one raffle from ticket sales → draw → payouts/refunds.
+  subgraph Frontend
+    FE[Ppopgi Web UI]
+  end
 
-Key properties:
-- range-based ticket tracking for gas efficiency
-- verifiable randomness (Pyth Entropy)
-- pull-based payouts
-- cancellation paths + refunds
-- escrowed liabilities accounting (USDC + native)
+  subgraph OnChain[Etherlink Mainnet]
+    R[LotteryRegistry]
+    D[SingleWinnerDeployer]
+    L[LotterySingleWinner<br/>(many instances)]
+    USDC[(USDC ERC20)]
+    E[Pyth Entropy]
+  end
 
-## Off-chain components
+  subgraph OffChain[Optional Off-chain]
+    BOT[Finalizer Bot]
+    IDX[Indexing Layer<br/>(optional)]
+  end
 
-### Frontend
-- Reads on-chain state for all views.
-- Sends transactions only after preflight checks.
+  U --> FE
+  S --> FE
 
-### Finalizer bot (Cloudflare Worker)
-- Permissionless liveness agent.
-- Scans registry, filters eligible raffles, calls `finalize()` with correct fee.
-- Uses KV locks and attempt TTLs to avoid repeated fee burns.
+  FE --> R
+  FE --> D
+  FE --> L
+
+  D --> L
+  D --> R
+
+  L --> USDC
+  L --> E
+  E --> L
+
+  BOT --> R
+  BOT --> L
+
+  IDX --> R
+  IDX --> D
+  IDX --> L
