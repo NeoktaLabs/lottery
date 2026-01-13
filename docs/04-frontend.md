@@ -65,6 +65,11 @@ The frontend should:
   - overpayment is refunded automatically
   - if a refund fails, it becomes withdrawable
 
+**Clarification**  
+Calling `finalize()` does not immediately select a winner.  
+It requests randomness and moves the raffle into a drawing state.  
+Winner selection and fund allocation occur later via the entropy callback.
+
 ---
 
 ## Bot is convenience, not trust
@@ -121,6 +126,10 @@ Users can still:
 - buy tickets directly via contracts
 - finalize raffles manually
 - claim funds independently
+
+**Refund note**  
+If a raffle is cancelled, ticket refunds are **claimable** by users and must be
+explicitly withdrawn. Refunds are never pushed automatically by the frontend.
 
 The frontend is **replaceable by design**.
 
