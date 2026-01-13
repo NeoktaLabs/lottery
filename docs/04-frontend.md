@@ -132,6 +132,20 @@ If the chain state is unknown, the UI should say so.
 
 ---
 
+### Winner visibility for settled raffles
+
+For transparency, once a raffle is **Settled/Completed**, the frontend should display:
+- the winning address (or truncated address)
+- the prize amount (USDC)
+- a link to the transaction or explorer view that proves settlement (when available)
+
+For raffles shown in “expired” / “past” lists, the raffle card should display the winner
+when the on-chain state indicates the raffle is settled.
+
+The frontend must not display a winner for raffles that are still **Open** or **Drawing**.
+
+---
+
 ## No custody, no authority
 
 The frontend:
