@@ -133,6 +133,11 @@ Each raffle:
 - No admin function can move user funds
 - Strong accounting invariants
 
+**Clarification (finalization vs resolution)**  
+Calling `finalize()` **does not immediately select a winner**.  
+Finalization requests randomness and moves the raffle into a drawing state.  
+Winner selection and fund allocation occur later during the entropy callback.
+
 ---
 
 ### 3.5 Entropy / Randomness (Pyth)
@@ -151,6 +156,10 @@ Each raffle:
 **Security**
 - Admin cannot influence outcome
 - Randomness request is locked at finalize time
+
+**Failure model**
+- If the randomness callback does not arrive, the raffle remains in a drawing state
+- An emergency cancellation path exists to recover funds (see Security Model)
 
 ---
 
@@ -182,6 +191,11 @@ A typical raffle lifecycle:
 6. Randomness resolves
 7. Winner is allocated
 8. Users withdraw funds themselves
+
+**Notes**
+- If minimum ticket sales are not met, the raffle is canceled
+- Ticket refunds must be **claimed and withdrawn by users**
+- No refunds are ever pushed automatically
 
 At **no point** does the admin:
 - pick winners
