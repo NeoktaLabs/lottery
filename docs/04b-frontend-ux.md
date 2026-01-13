@@ -128,6 +128,32 @@ This ensures transparency without overwhelming users.
 
 ---
 
+### Network mismatch UX (wrong chain)
+
+If the user is connected to the wrong network:
+
+- the UI should block actions calmly
+- explain that the raffle exists on **Etherlink**
+- guide the user to switch networks without alarmist language
+
+The UI should treat this as a configuration issue, not an error or failure.
+
+---
+
+### Approval & multi-step transaction UX
+
+Some actions require multiple on-chain steps (e.g. approving USDC, then buying tickets).
+
+The frontend should:
+- explain when an approval is required
+- distinguish clearly between “Approve” and the final action
+- show progress across steps without implying failure
+
+Multi-step flows should feel intentional and safe,  
+not like something went wrong.
+
+---
+
 ## 5. Finalization UX
 
 Although a background bot exists, users should understand that:
