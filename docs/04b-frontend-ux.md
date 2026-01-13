@@ -76,6 +76,11 @@ The UI should:
 - explain that this fee is not kept by the app
 - clarify that any overpayment is refunded automatically
 
+**Clarification**  
+Calling “Finalize” does not immediately pick a winner.  
+It requests randomness and moves the raffle into a drawing state.  
+Winner selection occurs later when the randomness callback is received.
+
 ---
 
 ## 4. Honest state representation
@@ -104,6 +109,10 @@ If the raffle is eligible for finalization:
 - the cost (entropy fee) should be visible
 - fallback instructions should exist if automation fails
 
+**Edge case note**  
+If randomness does not return, the raffle may remain in a drawing state  
+until an on-chain recovery path is used. The UI should reflect this honestly.
+
 ---
 
 ## 6. Claims & withdrawals UX
@@ -123,6 +132,10 @@ Claims should always be:
 - pull-based
 - user-initiated
 - idempotent
+
+**Refund clarification**  
+If a raffle is cancelled, ticket refunds must be explicitly claimed  
+by the user before withdrawal. Refunds are never pushed automatically.
 
 ---
 
