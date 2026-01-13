@@ -1,5 +1,19 @@
-# 뽑기 (Ppopgi) Lottery Platform (Etherlink / Tezos L2) — Design & Architecture
+# Finalizer Bot
 
-A secure, scalable raffle/lottery platform designed for **everyone** — from **non-crypto users** (smooth, friendly web experience) to **crypto-native users** (direct contract usage). Built for **Etherlink (Tezos L2)** and using **USDC (6 decimals)** for entries and payouts. Randomness is provided by **Pyth Entropy**.
+The Finalizer Bot ensures raffle liveness.
 
----
+It runs every minute and:
+- scans the registry
+- detects eligible raffles
+- calls `finalize()` when allowed
+
+### Important notes
+- Anyone can finalize raffles manually
+- The bot has no special permissions
+- It cannot change outcomes
+- It only improves user experience
+
+The bot uses:
+- strict simulation before sending transactions
+- idempotency locks to avoid fee waste
+- exact entropy fee payments
