@@ -132,6 +132,34 @@ If the chain state is unknown, the UI should say so.
 
 ---
 
+### Transparency fields shown in the UI
+
+To improve trust and reduce support requests, the frontend should surface
+key configuration fields directly from on-chain contracts.
+
+#### On the Create page (read from the factory / deployer)
+
+- `protocolFeePercent`
+- `feeRecipient`
+- `usdc`
+- `entropy`
+- `entropyProvider`
+
+These values represent the **factory defaults** that will be applied to newly
+created raffles.
+
+#### On raffle cards and raffle details (read from the raffle contract)
+
+For both active and past raffles, the frontend should display:
+
+- `protocolFeePercent`
+- `feeRecipient`
+- `deployer`
+
+All addresses shown in the UI should link to the **Etherlink explorer**.
+
+---
+
 ### Winner visibility for settled raffles
 
 For transparency, once a raffle is **Settled/Completed**, the frontend should display:
