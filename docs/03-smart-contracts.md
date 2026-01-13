@@ -164,10 +164,12 @@ A raffle progresses through the following conceptual states:
 1. **FundingPending**
 2. **Open**
 3. **Drawing**
-4. **Settled**
-5. **Cancelled**
+4. **Completed**
+5. **Canceled**
 
 State transitions are strictly enforced.
+
+> Note: naming reflects the on-chain enum values.
 
 ---
 
@@ -177,7 +179,7 @@ There are three distinct USDC pools:
 
 1. **Prize pot**
    - Pre-funded by the creator
-   - Locked until settlement
+   - Locked until settlement or cancellation
 
 2. **Ticket revenue**
    - Paid by entrants
@@ -195,7 +197,7 @@ USDC **never leaves the contract** except via explicit on-chain claims.
 
 - The prize pot must be funded before the raffle opens
 - Ticket price, caps, and deadlines are immutable
-- Randomness is requested exactly once
+- Randomness is requested at most once
 - Ticket count is frozen before randomness
 - Refunds are always available if the raffle is cancelled
 - Winner selection is deterministic from entropy output and ticket ranges
@@ -256,13 +258,16 @@ Triggers winner selection or cancellation.
 #### Behavior
 If **expired** and `ticketsSold < minTickets`:
 - raffle is cancelled
-- ticket refunds are allocated
-- any entropy fee sent is returned
+- creator prize pot becomes claimable
+- **ticket refunds are claimable by entrants via `claimTicketRefund()`**
+- any entropy fee sent is returned or becomes withdrawable
 
 Otherwise:
 - transitions to `Drawing`
 - requests randomness
 - freezes ticket count
+
+> Calling `finalize()` does **not** immediately select a winner.
 
 ---
 
@@ -278,27 +283,37 @@ Effects:
 - derives winning ticket index
 - resolves winning address via ticket ranges
 - allocates claimable balances
-- transitions to `Settled`
+- transitions to `Completed`
 
 ---
 
-### `claimUSDC()`
+### Refunds & withdrawals
 
-Allows participants to claim their USDC.
+USDC payouts are **pull-based**.
 
-Possible claimants:
-- winner (prize)
-- creator (ticket revenue minus protocol fee)
-- protocol (fee)
-- entrants (refunds if cancelled)
+Functions:
+- `withdrawFunds()`
+- `withdrawFundsTo(address to)`
 
-Claims are pull-based and idempotent.
+Refund allocation for cancelled raffles requires an explicit call by the entrant
+before withdrawal.
 
 ---
 
 ### `withdrawNative()` / `withdrawNativeTo(address to)`
 
 Withdraws refundable native token (typically from entropy overpayment refunds).
+
+---
+
+### Emergency cancellation (stuck randomness)
+
+If the raffle is in `Drawing` and the entropy callback does not arrive:
+
+- creator or owner may cancel after a delay
+- anyone may cancel after a longer delay
+
+This transitions the raffle to `Canceled` and enables refunds.
 
 ---
 
