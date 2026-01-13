@@ -1,6 +1,6 @@
 # Smart Contracts — Deep Technical Documentation
 
-This document provides a **complete and transparent description** of the Ppopgi (뽑기) smart contracts deployed on **Etherlink Mainnet**.
+This document provides a **complete and transparent description** of the Ppopgi (뽑기) smart contracts deployed on **Etherlink (Tezos L2, EVM-compatible)**.
 
 It explains:
 - what each contract is responsible for
@@ -13,131 +13,93 @@ It explains:
 
 The goal is **verifiability, not obscurity**.
 
----
-
-## Overview of On-Chain Architecture
-
-The protocol is composed of three core contracts:
-
-1. **LotteryRegistry**  
-   A minimal, long-lived registry that tracks all official lotteries.
-
-2. **SingleWinnerDeployer**  
-   A factory contract responsible for deploying and funding new lotteries.
-
-3. **LotterySingleWinner**  
-   A per-lottery contract handling ticket sales, randomness, payouts, and refunds.
-
-Each contract has a **narrow responsibility** and limited authority.
+All critical behavior is enforced on-chain and visible in code.
 
 ---
 
-## 1. LotteryRegistry (Forever Registry)
+## Contract overview
+
+The system consists of three core contracts:
+
+1. `LotteryRegistry`
+2. `SingleWinnerDeployer`
+3. `LotterySingleWinner`
+
+Each serves a narrowly defined role.
+
+---
+
+## 1. `LotteryRegistry`
+
+A minimal on-chain registry of “approved” raffle contracts.
 
 ### Purpose
+- Acts as a canonical list of deployed raffle contracts
+- Allows the frontend to discover raffles without indexing arbitrary addresses
+- Prevents spam by restricting who can register lotteries
 
-The registry acts as the **canonical on-chain index** of lotteries.
+### Key state
+- `owner`: admin address (owned by an Etherlink Safe)
+- `registrars`: mapping of authorized factories/deployers
+- `registered`: mapping of lottery address → metadata
 
-It contains:
-- all registered lottery addresses
-- their lottery type
-- creator attribution
-- pagination helpers for UIs and indexers
-
-It contains **no gameplay logic** and **no funds**.
-
----
-
-### Key State Variables
-
-- `owner`: admin (Safe multisig)
-- `allLotteries[]`: array of registered lottery addresses
-- `typeIdOf[lottery]`: lottery type identifier
-- `creatorOf[lottery]`: creator address
-- `registeredAt[lottery]`: timestamp
-- `isRegistrar[address]`: authorization mapping
+### Permissions
+- The owner can authorize or revoke registrars
+- Authorized registrars can register new lotteries
 
 ---
 
 ### Functions
 
-#### `constructor(address owner)`
-Initializes the registry owner.
-
----
-
 #### `setRegistrar(address registrar, bool allowed)` (owner-only)
 Authorizes or revokes a deployer’s ability to register lotteries.
 
-- Used to gate which factories are “official”
-- Prevents unauthorized spam registration
+Effects:
+- Updates `registrars[registrar]`
 
-Emits: `RegistrarSet`
+Emits:
+- `RegistrarSet(registrar, allowed)`
 
 ---
 
 #### `registerLottery(uint256 typeId, address lottery, address creator)`
-Registers a lottery.
+Registers a lottery in the registry.
 
 Requirements:
-- caller must be an authorized registrar
-- lottery must not already be registered
+- caller is an authorized registrar **or** explicitly allowed by the owner
+- `lottery` is not already registered
 
 Effects:
-- appends lottery to `allLotteries`
-- stores metadata mappings
+- Stores lottery metadata
+- Emits an event used by the frontend and indexers
 
-Emits: `LotteryRegistered`
-
----
-
-#### `isRegisteredLottery(address lottery)`
-Returns whether a lottery is registered.
+Emits:
+- `LotteryRegistered(typeId, lottery, creator)`
 
 ---
 
-#### Pagination helpers
-- `getAllLotteriesCount`
-- `getAllLotteries(start, limit)`
-- `getLotteriesByTypeCount(typeId)`
-- `getLotteriesByType(typeId, start, limit)`
-- `getLotteryByTypeAtIndex(typeId, index)`
+## 2. `SingleWinnerDeployer`
 
-These functions **never loop unboundedly** and are safe for UIs.
-
----
-
-### Security Notes
-
-- Registry holds **no funds**
-- Registry cannot modify lotteries
-- Registry can only list addresses
-- Owner power is limited to registrar management
-
----
-
-## 2. SingleWinnerDeployer (Factory)
+Factory contract responsible for deploying and initializing `LotterySingleWinner` instances.
 
 ### Purpose
+- Deploys new raffle contracts
+- Transfers the prize pot into the raffle
+- Calls `confirmFunding()` so the raffle can open
+- Optionally registers the raffle in `LotteryRegistry`
 
-The deployer is responsible for:
-- deploying new `LotterySingleWinner` instances
-- funding the initial prize pot
-- transferring ownership to the Safe
-- registering the lottery (best-effort)
+### Key state
+- `owner`: admin (Etherlink Safe)
+- `registry`: `LotteryRegistry` address
+- `usdc`: ERC20 USDC token address
+- `entropy`: Entropy contract address
+- `entropyProvider`: randomness provider address
+- `feeRecipient`: protocol fee recipient
+- `protocolFeePercent`: **default** protocol fee percentage for newly deployed lotteries
 
----
-
-### Key State Variables
-
-- `owner`: Safe multisig
-- `registry`: LotteryRegistry
-- `safeOwner`: final admin owner of lotteries
-- `usdc`: ERC20 used for tickets
-- `entropy`: Pyth Entropy contract
-- `entropyProvider`: default randomness provider
-- `feeRecipient`: protocol fee address
-- `protocolFeePercent`: immutable fee percentage per lottery
+> ⚠️ Note  
+> `protocolFeePercent` is mutable **only at the deployer level** and only affects **future lotteries**.  
+> Each deployed `LotterySingleWinner` stores its own **immutable copy**.
 
 ---
 
@@ -145,256 +107,221 @@ The deployer is responsible for:
 
 #### `createSingleWinnerLottery(...)`
 
-Creates and activates a new lottery.
+Deploys and activates a new single-winner raffle.
 
-Flow:
-1. Checks deployer is an authorized registrar
-2. Deploys `LotterySingleWinner`
-3. Transfers prize pot (USDC) from creator
-4. Calls `confirmFunding()` on the lottery
-5. Transfers ownership of the lottery to the Safe
-6. Attempts registry registration (`try/catch`)
+High-level flow:
+1. Checks caller is an authorized registrar
+2. Deploys a new `LotterySingleWinner`
+3. Transfers the prize pot (USDC) from the creator to the raffle
+4. Calls `confirmFunding()` on the raffle
+5. Transfers ownership of the raffle to the Safe
+6. Attempts to register the raffle in `LotteryRegistry`
 
-If registry registration fails:
-- the lottery still exists and works
-- emits `RegistrationFailed`
+If registration fails:
+- the raffle still exists and functions normally
+- a `RegistrationFailed` event is emitted
 
-Emits: `LotteryDeployed`
+Emits:
+- `LotteryDeployed(lottery, creator)`
 
 ---
 
 #### `setConfig(...)` (owner-only)
-Updates defaults for **future lotteries only**.
+Updates deployer defaults for **future lotteries only**.
 
-Does NOT affect existing lotteries.
-
----
-
-#### `rescueRegistration(lottery, creator)` (owner-only)
-Manually registers a lottery if automatic registration failed.
-
-Validations:
-- lottery has contract code
-- deployed by this deployer
-- owned by the Safe
+Does NOT affect existing raffles.
 
 ---
 
-### Security Notes
+#### `rescueERC20(address token, address to, uint256 amount)` (owner-only)
+Emergency token rescue for the deployer contract itself.
 
-- Deployer never holds funds
-- Deployer cannot modify deployed lotteries
-- Deployer cannot change fees of existing lotteries
+Does NOT affect deployed raffles.
 
 ---
 
-## 3. LotterySingleWinner (Per-Raffle Contract)
+## 3. `LotterySingleWinner`
+
+The primary raffle contract.
+
+Each instance represents **one raffle with exactly one winner**.
 
 ### Purpose
-
-Handles:
-- ticket sales
-- randomness
-- winner selection
-- payouts
-- refunds
-- accounting invariants
-
-Each instance represents **one raffle**.
+- Holds the prize pot in USDC
+- Sells tickets in USDC
+- Enforces caps, deadlines, and validation rules
+- Requests randomness via Entropy
+- Selects one winning ticket
+- Allocates claimable balances
+- Supports cancellation and refunds if requirements are not met
 
 ---
 
-## Lifecycle & Status
+## Lifecycle
 
-Status enum:
+A raffle progresses through the following conceptual states:
 
-| Value | State |
-|-----|------|
-| 0 | FundingPending |
-| 1 | Open |
-| 2 | Drawing |
-| 3 | Completed |
-| 4 | Canceled |
+1. **FundingPending**
+2. **Open**
+3. **Drawing**
+4. **Settled**
+5. **Cancelled**
 
----
-
-## Core Accounting Model
-
-### USDC Accounting
-- `totalReservedUSDC` tracks **all USDC owed**
-- Includes:
-  - winning pot
-  - ticket revenue
-  - protocol fees
-  - refunds
-
-Invariant:
-usdc.balanceOf(contract) >= totalReservedUSDC
+State transitions are strictly enforced.
 
 ---
 
-### Native Token Accounting
-- `totalClaimableNative` tracks refundable native token amounts
-- Used to safely refund entropy overpayments
+## Funds model
+
+There are three distinct USDC pools:
+
+1. **Prize pot**
+   - Pre-funded by the creator
+   - Locked until settlement
+
+2. **Ticket revenue**
+   - Paid by entrants
+   - Distributed at settlement or refunded on cancellation
+
+3. **Protocol fee**
+   - Carved out at settlement
+   - Claimable by the protocol fee recipient
+
+USDC **never leaves the contract** except via explicit on-chain claims.
 
 ---
 
-## Functions (Detailed)
+## Core invariants
+
+- The prize pot must be funded before the raffle opens
+- Ticket price, caps, and deadlines are immutable
+- Randomness is requested exactly once
+- Ticket count is frozen before randomness
+- Refunds are always available if the raffle is cancelled
+- Winner selection is deterministic from entropy output and ticket ranges
+
+---
+
+## Key functions
 
 ### `confirmFunding()`
+
 Finalizes setup after prize funding.
 
 Requirements:
-- exact prize amount must be present
+- USDC balance must be **at least** the prize amount (`balance ≥ winningPot`)
 
-Transitions:
-- FundingPending → Open
+> Extra USDC sent before confirmation does **not** brick the raffle.
+
+Effects:
+- Transitions state from `FundingPending` → `Open`
 
 ---
 
 ### `buyTickets(uint256 count)`
-Allows users to buy tickets.
 
-Validations:
-- status is Open
-- not expired
-- buyer is not creator
-- count within bounds
-- caps respected
+Allows users to purchase tickets.
 
-Security:
-- **Nuclear CEI**:
-  - state updated before transfer
-  - balance delta checked after transfer
+Requirements:
+- raffle is `Open`
+- raffle not expired
+- caller is not the creator
+- `count > 0`
+- total tickets sold + `count` ≤ `maxTickets`
+- per-wallet cap respected (if configured)
+
+#### Anti-spam rule (important)
+If the buyer is **not extending the latest ticket range**,  
+the **total purchase cost must be ≥ 1 USDC** (USDC has 6 decimals).
+
+This prevents griefing via tiny fragmented ticket ranges.
 
 Effects:
-- ticket ranges appended or extended
-- `totalReservedUSDC` increased
+- ticket ranges are appended or extended
+- `totalReservedUSDC` increases
 
 ---
 
 ### `finalize()` (payable)
-Triggers randomness request.
 
-Eligibility:
-- status == Open
-- expired OR sold out
+Triggers winner selection or cancellation.
 
-If min tickets not met:
-- lottery cancels
-- refunds allocated
+#### Entropy fee
+- Caller must send enough native token to cover  
+  `entropy.getFee(entropyProvider)`
+- `msg.value` must be **≥ required fee**
+- Overpayment is refunded immediately
+- If a refund fails, the amount becomes withdrawable via `withdrawNative()`
 
-Else:
-- transitions to Drawing
-- requests entropy
+#### Behavior
+If **expired** and `ticketsSold < minTickets`:
+- raffle is cancelled
+- ticket refunds are allocated
+- any entropy fee sent is returned
+
+Otherwise:
+- transitions to `Drawing`
+- requests randomness
 - freezes ticket count
 
 ---
 
 ### `entropyCallback(...)`
-Receives randomness.
 
-Validations:
-- correct entropy contract
-- correct request id
-- correct provider
+Receives randomness from Entropy.
 
-Effects:
-- selects winner via binary search
-- allocates winnings and fees
-- transitions to Completed
-
----
-
-### `claimTicketRefund()`
-Allocates refunds to users in canceled lotteries.
+Requirements:
+- callable only by the Entropy contract
+- state must be `Drawing`
 
 Effects:
-- credits `claimableFunds[user]`
-- zeroes `ticketsOwned[user]`
+- derives winning ticket index
+- resolves winning address via ticket ranges
+- allocates claimable balances
+- transitions to `Settled`
 
 ---
 
-### `withdrawFunds()`
-Withdraws USDC owed to caller.
+### `claimUSDC()`
 
-Effects:
-- transfers USDC
-- decreases `totalReservedUSDC`
+Allows participants to claim their USDC.
 
----
+Possible claimants:
+- winner (prize)
+- creator (ticket revenue minus protocol fee)
+- protocol (fee)
+- entrants (refunds if cancelled)
 
-### `withdrawNative()` / `withdrawNativeTo(to)`
-Withdraws native refunds.
-
-Effects:
-- decreases `totalClaimableNative`
+Claims are pull-based and idempotent.
 
 ---
 
-### `cancel()`
-Cancels expired lotteries with insufficient tickets.
+### `withdrawNative()` / `withdrawNativeTo(address to)`
+
+Withdraws refundable native token (typically from entropy overpayment refunds).
 
 ---
 
-### `forceCancelStuck()`
-Emergency hatch if entropy callback never arrives.
+## Security & transparency notes
 
-Time-locked:
-- privileged after 24h
-- public after 7 days
+- No admin can change outcomes
+- No admin can drain funds
+- No backend can override results
+- All critical logic is enforced by code
 
----
-
-### Admin-only Functions
-
-- `pause / unpause`
-- `setEntropyProvider`
-- `setEntropyContract`
-- `sweepSurplus`
-- `sweepNativeSurplus`
-
-**Admin cannot:**
-- move owed funds
-- change winners
-- affect completed raffles
+Every important action:
+- emits events
+- leaves an on-chain audit trail
+- can be verified independently
 
 ---
 
-## Invariants & Safety Properties
+## Final note
 
-- Funds owed are always tracked
-- Surplus sweeping cannot touch liabilities
-- Winner selection is deterministic from entropy
-- State transitions are one-way
-- Randomness provider cannot be changed mid-draw
+These contracts were designed with:
+- clarity over cleverness
+- safety over flexibility
+- explicit rules over implicit behavior
 
----
-
-## Known Limitations & Tradeoffs
-
-- Pull-based withdrawals require user action
-- Refunds are two-step (claim + withdraw)
-- Range model can hit limits under extreme griefing (bounded by safeguards)
-- Randomness callback depends on external provider availability
-
----
-
-## Transparency Promise
-
-Every rule described here:
-- is enforced on-chain
-- is visible in code
-- is verifiable by anyone
-
-There are no hidden behaviors.
-
----
-
-## Final Note
-
-These contracts were designed with **clarity, safety, and decentralization** in mind.
-
-They are experimental, but intentionally constrained.
-
-If something feels unclear, it should be documented — not hidden.
+If something feels unclear,  
+it should be documented — not hidden.
