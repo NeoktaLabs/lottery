@@ -1,5 +1,16 @@
-# 뽑기 (Ppopgi) Lottery Platform (Etherlink / Tezos L2) — Design & Architecture
+# Security Model
 
-A secure, scalable raffle/lottery platform designed for **everyone** — from **non-crypto users** (smooth, friendly web experience) to **crypto-native users** (direct contract usage). Built for **Etherlink (Tezos L2)** and using **USDC (6 decimals)** for entries and payouts. Randomness is provided by **Pyth Entropy**.
+## Threat assumptions
+- Frontend can disappear
+- Bot can stop
+- Admin keys can be compromised
 
----
+## Protections
+- Funds are locked in immutable contracts
+- Withdrawals are user-initiated
+- Randomness is externally verifiable
+- No admin withdrawal functions exist
+
+## Emergency paths
+- Raffles can be canceled if randomness callbacks fail
+- Refunds are always pull-based
