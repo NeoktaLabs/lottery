@@ -10,158 +10,129 @@ It is commonly used to describe:
 - capsule machines
 - simple childhood games of chance
 
-This perfectly reflects the spirit of the project:
+This perfectly reflects the spirit of the project:  
 a **simple, fair, transparent draw**, without casino pressure, dark patterns, or technical intimidation.
 
 Ppopgi aims to make on-chain raffles feel:
-- calm
-- understandable
-- welcoming to non-technical users
-- verifiable by anyone who wants to look deeper
+- approachable
+- verifiable
+- honest
+- human
 
 ---
 
-## Why this project exists
+## What Ppopgi is (and is not)
 
-This project was built by a **solo IT engineer**, exploring the blockchain ecosystem out of curiosity, learning, and long-term belief in **Tezos**.
+### Ppopgi **is**
+- fully on-chain and non-custodial
+- verifiable by anyone at any time
+- designed around clear rules and visible outcomes
+- resistant to admin abuse by construction
+- built with conservative assumptions
 
-While I am **not a professional smart-contract developer**, my professional background is:
-- **Lead Systems & Network Engineering**
-- strong infrastructure design experience
-- security-focused environments
-- production-grade operational responsibility
+### Ppopgi is **not**
+- a gambling platform
+- a casino
+- a yield product
+- a black-box “game”
+- a system that relies on trust in the frontend or operators
 
-Security, failure modes, and system boundaries are therefore a **natural concern** for me, even while learning a new technical domain.
-
-Ppopgi was:
-- built **entirely in spare time**
-- **self-funded**
-- designed carefully for **future scalability**
-- approached as a **serious learning and experimentation project**
-
-It has also been a **very large and enjoyable learning experience**, and the hope is that it can remain safe, useful, and interesting over time.
-
----
-
-## Transparency & AI-assisted development
-
-All parts of the project:
-- smart contracts
-- frontend
-- automation bot
-
-were **written, reviewed, and iterated with the help of AI agents**.
-
-This has allowed rapid exploration and documentation, but it also means:
-
-> There is **no guarantee** that the system is 100% bug-free or perfectly secure.
-
-This is **not stated as an alarm**, but as an honest transparency principle.
-The system has been:
-- carefully tested
-- thoroughly documented
-- intentionally designed to limit damage in case of mistakes
-
-Users are encouraged to:
-- read the documentation
-- verify behavior on-chain
-- interact only with amounts they are comfortable with
+If the frontend disappears,  
+**the raffles still work.**
 
 ---
 
-## Tezos values & decentralization
+## Core design goals
 
-Ppopgi is strongly aligned with **Tezos DNA**:
+Ppopgi is designed around a few simple principles:
 
-- transparency over marketing
-- decentralization over control
-- safety over speed
-- composability over lock-in
+### 1. Transparency over cleverness
+All meaningful behavior:
+- happens on-chain
+- is visible in code
+- is documented clearly
 
-Key principles:
-- no hidden logic
-- no off-chain winners
-- no admin power to drain funds
-- all critical actions visible on-chain
-- optional automation, never required
+There are no hidden mechanics, odds manipulation, or backend overrides.
 
 ---
 
-## Project components
+### 2. Safety through constraints
+Rather than supporting every possible feature, the system is intentionally limited:
+- fixed ticket prices
+- fixed prize pots
+- immutable rules per raffle
+- no mid-game changes
 
-Ppopgi is composed of **three independent systems**:
-
-### 1. Smart contracts (on Etherlink)
-- Lottery registry (forever index)
-- Factory / deployer
-- Per-raffle instances
-- Fully permissionless play & finalize
-- Pull-based withdrawals
-
-### 2. Frontend (Web UI)
-- Non-technical language
-- On-chain truth only
-- Clear visibility of fees, providers, and verification
-- Designed for calm, friendly UX
-
-### 3. Finalizer bot (optional)
-- Permissionless automation
-- Ensures raffles never get stuck
-- Anyone can run their own alternative bot
-- No special privileges
+This reduces both complexity and attack surface.
 
 ---
 
-## Fees & sustainability
+### 3. Decentralization where it matters
+While some components exist for convenience (frontend, bot), they are **not trusted components**.
 
-The project is **self-funded**.
+Critical actions:
+- buying tickets
+- finalizing raffles
+- claiming funds
 
-To cover:
-- infrastructure costs
-- RPC usage
-- hosting
-- long-term maintenance
-
-each raffle includes a **clearly visible protocol fee**:
-- percentage shown in raffle details
-- fee recipient address visible
-- immutable per raffle once created
-
-Currently:
-- the owner (Safe) has a single controlling address
-- there is **no power to interfere with active raffles**
-- no ability to change rules mid-game
-- no ability to extract user funds
-
-If the project grows, additional entities may be added to the Safe.
-This will be done transparently and documented publicly.
+can all be performed **directly on-chain by anyone**.
 
 ---
 
-## Experimental nature
+### 4. Honest UX
+The frontend:
+- reflects on-chain state
+- does not invent or simulate outcomes
+- avoids misleading gamification
+- explains costs and requirements upfront
 
-Ppopgi is **experimental**.
+If something is irreversible or risky, the UI should say so plainly.
 
-It may not be perfect.
-It may evolve.
-It may contain edge cases.
+---
 
-But it is built with:
-- care
-- humility
-- transparency
-- a genuine desire to do things properly
+## Who this project is for
 
-If it helps others learn, experiment, or build on Tezos — then it has already succeeded.
+Ppopgi is for:
+- builders who want to study a clean, auditable raffle design
+- users who want a simple on-chain draw without hidden tricks
+- the Tezos / Etherlink ecosystem as a reference implementation
+
+It is **not** designed to maximize engagement, addiction, or revenue.
+
+---
+
+## Status & intent
+
+This project is:
+- experimental
+- production-deployed
+- intentionally conservative
+- documented in full
+
+Mistakes are possible.  
+What matters is that:
+- the rules are visible
+- the limitations are known
+- the system does exactly what it claims — no more, no less
+
+If it helps others learn, experiment, or build on Tezos,  
+then it has already succeeded.
 
 ---
 
 ## Documentation map
 
+This repository contains the following documentation files:
+
 - `01-overview.md` — project vision & philosophy (this file)
 - `02-architecture.md` — system architecture & diagrams
-- `03-smart-contracts.md` — deep contract documentation
-- `04-frontend.md` — frontend technical & UX spec
-- `05-bot.md` — finalizer bot design
-- `06-security-model.md` — threat model & guarantees
-- `07-deployments.md` — addresses & environments
+- `03-smart-contracts.md` — deep smart contract documentation
+- `04-frontend.md` — frontend architecture & guarantees
+- `04b-frontend-ux.md` — frontend UX philosophy & user-facing guarantees
+- `05-finalizer-bot.md` — finalizer bot design & behavior
+- `06-security-model.md` — threat model & trust assumptions
+- `07-deployments.md` — deployment & operational model
+- `08-technical-references.md` — addresses, constants & external dependencies
+
+Each document is intended to be readable on its own,  
+but together they describe the full system end-to-end.
