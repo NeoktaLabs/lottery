@@ -76,6 +76,14 @@ Once a raffle has opened, the admin cannot:
 - ❌ block refunds
 - ❌ move USDC out of the contract
 
+**Clarification**  
+A “valid raffle” means one that:
+- has met its minimum ticket requirement, and
+- is not stuck waiting indefinitely on randomness.
+
+Emergency cancellation is possible only in the case of stalled randomness  
+and exists solely to recover user funds.
+
 All of these properties are enforced by code.
 
 ---
@@ -118,7 +126,7 @@ These scenarios delay settlement but do **not** allow fund theft or outcome mani
 ### Fee handling guarantees
 - Overpayment is refunded automatically.
 - If an automatic refund fails, the amount becomes withdrawable.
-- If the raffle cancels due to insufficient ticket sales, any entropy fee sent is returned.
+- If the raffle cancels due to insufficient ticket sales, any entropy fee sent is returned or becomes withdrawable.
 
 ---
 
@@ -134,7 +142,21 @@ In this case:
 - the prize pot remains untouched
 - refunds are claimable on-chain by users
 
-Cancellation is deterministic and cannot be blocked by the admin.
+**Refund mechanism clarification**  
+Ticket refunds are not pushed automatically.  
+Entrants must explicitly claim their refund before withdrawing funds.
+
+---
+
+## Emergency cancellation (stuck randomness)
+
+If a raffle is in a drawing state and the randomness callback does not arrive:
+
+- the creator or admin may cancel after a short delay
+- anyone may cancel after a longer delay
+
+This mechanism exists solely to recover funds and does not allow  
+outcome manipulation or selective cancellation.
 
 ---
 
@@ -169,6 +191,18 @@ The finalizer bot:
 - does not introduce trust assumptions
 
 If both disappear, the system still functions.
+
+---
+
+## Surplus recovery (safety accounting)
+
+To recover accidental transfers:
+
+- USDC above on-chain reserved liabilities may be swept
+- native token above tracked refundable balances may be swept
+
+This recovery mechanism cannot affect legitimate user funds  
+and is constrained by explicit on-chain accounting.
 
 ---
 
