@@ -94,6 +94,19 @@ It should:
 
 If a raffle is waiting on randomness, the UI should say so explicitly.
 
+### Winner display (transparency)
+
+Once a raffle is **Settled**, the UI should clearly display the winner on:
+- the raffle details page
+- raffle cards in “past” / “expired” browsing views
+
+This should be presented as factual state, not celebration:
+- show a truncated address (e.g. `0xABCD…1234`)
+- show the prize amount
+- provide an explorer link when possible
+
+The UI must not imply a winner exists before settlement.
+
 ---
 
 ## 5. Finalization UX
