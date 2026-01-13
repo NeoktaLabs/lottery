@@ -45,6 +45,29 @@ It reflects the idea that this should feel like a **simple, fair game**, not a c
 
 ---
 
+## About the code & how this project was built
+
+All the **coding parts of this project** — including:
+- smart contracts
+- frontend application
+- automation / finalizer bot
+
+were **designed, written, tested, and deployed with the help of AI agents**.
+
+I acted as:
+- the project designer
+- the system integrator
+- the reviewer and tester
+- the person making final decisions and trade-offs
+
+While I paid close attention to architecture, security principles, and testing,  
+this also means that **there is no guarantee that the system is 100% bug-free or perfectly secure**.
+
+Nothing here should be considered production-grade or risk-free.  
+Please interact with the project thoughtfully and only with amounts you are comfortable with.
+
+---
+
 ## Funding, fees & sustainability
 
 Because the project is self-funded, the platform includes a **protocol fee** on raffles.
@@ -80,24 +103,6 @@ Importantly:
 - core game logic is enforced by immutable smart-contract rules
 
 Because of this limited authority model and the strong transparency around fees and behavior, there is **no critical custodial risk at this stage**, even with a single-owner Safe.
-
----
-
-## Important disclaimer (please read)
-
-I am **not a professional smart-contract developer**, and this project was built with the help of **AI agents**, iteration, and a lot of testing.
-
-This means:
-- the code **may contain bugs or edge cases**
-- the system is **not formally audited**
-- things might not behave exactly as expected in every scenario
-
-Please only interact with the project using amounts you are comfortable with.
-
-That said, I have:
-- tested all main user flows (create, play, draw, cancel, refunds, withdrawals)
-- documented the system extensively so behavior can be understood and verified
-- designed the UI around strict **“on-chain truth only”** rules
 
 ---
 
