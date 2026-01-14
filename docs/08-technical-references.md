@@ -19,6 +19,10 @@ This file is meant to be:
 
 When an address is not yet finalized, it is explicitly marked as **TBD**.
 
+> This document is factual and referential.  
+> Security properties, invariants, and trust assumptions are described in  
+> `06-security-model.md`.
+
 ---
 
 ## 2. Network Information
@@ -75,6 +79,12 @@ When an address is not yet finalized, it is explicitly marked as **TBD**.
 | Deployed Raffles | Dynamic | One contract per raffle |
 
 > Raffle instances are deployed dynamically and listed via the registry.
+
+Each raffle contract:
+- holds its own funds
+- enforces its own rules
+- maintains independent accounting
+- may sweep **surplus funds only** when allowed by on-chain accounting invariants
 
 ---
 
