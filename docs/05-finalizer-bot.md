@@ -74,7 +74,8 @@ Several protections are built in:
 - **Simulation before sending**
   - Every transaction is simulated first
 - **Exact fee payment**
-  - Avoids dust or trapped native tokens
+  - The bot pays the exact entropy fee required by the contract
+  - This avoids creating unnecessary native token surplus in raffle contracts
 - **Idempotency TTL**
   - Prevents repeated attempts on the same raffle
 - **Transaction cap**
@@ -119,6 +120,7 @@ The bot wallet:
 Even if compromised:
 - worst case is wasted fees
 - no user funds are at risk
+- no raffle state can be corrupted
 
 ---
 
