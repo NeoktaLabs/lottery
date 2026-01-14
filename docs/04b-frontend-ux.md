@@ -74,7 +74,10 @@ When a raffle is ready to draw, finalization requires:
 The UI should:
 - label this as a “network randomness fee” (or similar)
 - explain that this fee is not kept by the app
-- clarify that any overpayment is refunded automatically
+- clarify that any overpayment is refunded automatically **when possible**
+
+If an automatic refund cannot be delivered (for example, if the caller cannot receive native token),
+the refundable amount becomes claimable and can be withdrawn manually.
 
 **Clarification**  
 Calling “Finalize” does not immediately pick a winner.  
