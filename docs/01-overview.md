@@ -40,6 +40,10 @@ Ppopgi aims to make on-chain raffles feel:
 If the frontend disappears,  
 **the raffles still work.**
 
+> **Note on administration**  
+> Administrative roles exist but are deliberately constrained.  
+> They **cannot modify raffle rules, ticket prices, odds, or outcomes**, and cannot interfere once a draw is in progress.
+
 ---
 
 ## Core design goals
@@ -76,6 +80,9 @@ Critical actions:
 - claiming funds
 
 can all be performed **directly on-chain by anyone**.
+
+Finalizing a raffle requires paying a native network fee to request on-chain randomness.  
+Anyone may pay this fee, and finalizer bots exist for convenience — not trust.
 
 ---
 
@@ -120,6 +127,21 @@ then it has already succeeded.
 
 ---
 
+## Security review status
+
+The smart contracts have **not yet undergone a full professional third-party audit**.
+
+They have, however, been extensively tested using:
+- comprehensive unit tests
+- property-based fuzzing
+- invariant testing with Foundry
+
+These tests enforce critical safety, accounting, and state-machine properties across a wide range of adversarial execution paths.
+
+While testing cannot replace a formal audit, this approach provides strong confidence that the system behaves as specified under realistic and adversarial conditions.
+
+---
+
 ## Documentation map
 
 This repository contains the following documentation files:
@@ -152,6 +174,9 @@ They refer to the same on-chain construct.
 - **Finalize** = request randomness and begin settlement  
   (winner selection occurs during the entropy callback)
 - **Withdraw / Claim** = pull-based payout from the contract
+
+Randomness is delivered via an external entropy callback.  
+Invalid or late callbacks are safely ignored and do not affect raffle state.
 
 ---
 
