@@ -166,6 +166,7 @@ Mitigations:
 - manual fallback paths
 - transparent UX
 - conservative defaults
+- invariant-enforced on-chain accounting
 
 ---
 
@@ -182,6 +183,13 @@ Governance actions are therefore limited to:
 - deploying new contracts
 - updating off-chain components
 - communicating changes clearly
+
+To prevent permanent fund lock-up:
+- surplus USDC (above reserved liabilities) may be swept
+- surplus native token (above refundable balances) may be swept
+
+These operations are constrained by on-chain accounting
+and cannot affect legitimate user funds.
 
 ---
 
