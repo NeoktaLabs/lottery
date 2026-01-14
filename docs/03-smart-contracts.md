@@ -1,4 +1,4 @@
-# Smart Contracts — Deep Technical Documentation
+# Ppopgi (뽑기) — Smart Contracts — Deep Technical Documentation
 
 This document provides a **complete and transparent description** of the Ppopgi (뽑기) smart contracts deployed on **Etherlink (Tezos L2, EVM-compatible)**.
 
