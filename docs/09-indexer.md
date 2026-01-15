@@ -1,4 +1,4 @@
-# Ppopgi (뽑기) Indexer (The Graph) — Documentation
+# Ppopgi (뽑기) Indexer (The Graph) — Documentation (Revised)
 
 This document describes the **Ppopgi indexer** built with **The Graph**, targeting **Etherlink (EVM)**.
 
@@ -80,6 +80,7 @@ The following data **MUST NOT** be relied upon from the indexer and **MUST alway
 - per-user prize eligibility
 - current finalize eligibility
 - allowance and approval state for USDC
+- paused / unpaused state
 - any value that directly determines whether a user can safely sign a transaction
 
 The indexer is a **discovery and history layer**, not a transactional authority.
@@ -122,7 +123,8 @@ Key lifecycle events:
 Optional analytics-only event:
 - `TicketsPurchased(buyer, count, totalCost, totalSold, rangeIndex, isNewRange)`
 
-> Analytics events MUST NOT be used for accounting, eligibility, or user balances.
+> Analytics events MUST NOT be used for accounting, eligibility, or user balances.  
+> Any indexed ticket counts are informational only and must be confirmed on-chain.
 
 ---
 
@@ -173,11 +175,37 @@ Frontend list pages MUST only display raffles where `isRegistered == true`.
 
 > The contract’s `FundingPending` state MUST NOT be surfaced by the indexer.
 
+##### Authoritative lifecycle rules
+
+Status MUST be derived from events as follows:
+
+- `LotteryFinalized` ⇒ status becomes `DRAWING`
+- `WinnerPicked` ⇒ status becomes `COMPLETED`
+- `LotteryCanceled` ⇒ status becomes `CANCELED` (from **any prior state**, including `DRAWING`)
+
+The indexer MUST support the transition:
+- `DRAWING → CANCELED`  
+to reflect emergency recovery when randomness fails to return.
+
+---
+
 - `winner`: `Bytes` (nullable)
 - `winningTicketIndex`: `BigInt` (optional)
-- `finalizeRequestId`: `BigInt` (optional)
+
+- `finalizeRequestId`: `BigInt` (optional)  
+  Represents the active randomness request ID.
+  - Set on `LotteryFinalized`
+  - MUST be cleared on:
+    - `WinnerPicked`
+    - `LotteryCanceled`
+
 - `selectedProvider`: `Bytes` (optional)
-- `canceledReason`: `String` (optional)
+  - Valid only while `status == DRAWING`
+  - MUST be cleared on completion or cancellation
+
+- `canceledReason`: `String` (optional)  
+  Informational only. Frontend MUST NOT branch logic on this value.
+
 - `canceledAt`: `BigInt` (optional)
 - `soldAtCancel`: `BigInt` (optional)
 
