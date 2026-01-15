@@ -51,6 +51,7 @@ All the **coding parts of this project** — including:
 - smart contracts
 - frontend application
 - automation / finalizer bot
+- testing, fuzzing, and invariants
 
 were **designed, written, tested, and deployed with the help of AI agents**.
 
@@ -108,7 +109,7 @@ Because of this limited authority model and the strong transparency around fees 
 
 ## Project structure
 
-Ppopgi is made of three independent parts:
+Ppopgi is composed of **independent but complementary components**:
 
 - **Smart contracts**  
   A registry, a factory, and per-raffle instances with clear responsibilities and minimal surface area.
@@ -117,14 +118,35 @@ Ppopgi is made of three independent parts:
   A friendly interface that mirrors on-chain state and avoids unnecessary abstraction.
 
 - **Finalizer bot**  
-  A permissionless helper that improves user experience by making sure raffles don’t stay stuck forever.
+  A permissionless helper that improves user experience by ensuring raffles don’t remain stuck.
 
-Each component can be deployed, verified, and run independently.
+- **Testing & invariants**  
+  A dedicated Foundry-based test suite with unit tests, fuzzing, and invariant enforcement.
 
-### Repositories
-- **Smart contracts:** https://github.com/NeoktaLabs/ppopgi-smartcontracts  
-- **Frontend:** https://github.com/NeoktaLabs/ppopgi-frontend  
-- **Finalizer bot:** https://github.com/NeoktaLabs/ppopgi-finalizerbot  
+Each component can be deployed, verified, reviewed, and run independently.
+
+---
+
+## Repositories (references)
+
+The project is split across multiple public repositories:
+
+- **Smart contracts (production code)**  
+  https://github.com/NeoktaLabs/ppopgi-smartcontracts
+
+- **Smart contracts — Foundry tests & invariants**  
+  https://github.com/NeoktaLabs/ppopgi-smartcontracts-foundry
+
+- **Frontend application**  
+  https://github.com/NeoktaLabs/ppopgi-frontend
+
+- **Finalizer bot**  
+  https://github.com/NeoktaLabs/ppopgi-finalizerbot
+
+These repositories are intentionally separated to make:
+- auditing easier
+- responsibilities clearer
+- experimentation safer
 
 ---
 

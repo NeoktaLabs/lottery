@@ -62,8 +62,12 @@ The frontend should:
 - explain why finalization requires a small native payment
 - show the estimated fee when possible
 - clarify that:
-  - overpayment is refunded automatically
-  - if a refund fails, it becomes withdrawable
+  - overpayment is refunded automatically (when possible)
+  - if a refund fails (e.g. the caller cannot receive native token), it becomes withdrawable via `withdrawNative()`
+
+**Additional note (native surplus)**  
+Raffle contracts may also hold native token that is not explicitly owed to a user (e.g. accidental transfers).  
+This native surplus is not part of user claimables and may be swept by governance while preserving user withdrawals.
 
 **Clarification**  
 Calling `finalize()` does not immediately select a winner.  
