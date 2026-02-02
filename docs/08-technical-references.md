@@ -67,7 +67,7 @@ When an address is not yet finalized, it is explicitly marked as **TBD**.
 | Contract | Address | Status |
 |--------|---------|--------|
 | LotteryRegistry | `0x1CD24E0C49b1B61ff07be12fBa3ce58eCb20b098` | Deployed |
-| SingleWinnerDeployer | `0x6050196520e7010Aa39C8671055B674851E2426D` | Deployed |
+| SingleWinnerDeployer | `0xe48da5BCb4E276C508285E0D9B8A9A84Dd9bf704` | Deployed |
 
 ---
 
@@ -103,7 +103,7 @@ Each raffle contract:
 
 | Item | Address | Notes |
 |----|--------|------|
-| Entropy Contract | `0x2880aB155794e7179c9eE2e38200202908C17B43` | Verify before deployment |
+| Entropy Contract | `0x23f0e8faee7bbb405e7a7c3d60138fcfd43d7509` | Verify before deployment |
 | Entropy Provider | `0x52DeaA1c84233F7bb8C8A45baeDE41091c616506` | Default provider |
 
 ---
